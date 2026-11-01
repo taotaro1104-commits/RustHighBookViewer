@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -18,10 +20,28 @@ android {
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
 
+    // リリース署名。秘密情報は Git に入れない keystore.properties から読む（無ければ署名なしでビルド）
+    // 必要なキー: storeFile / storePassword / keyAlias / keyPassword
+    val keystoreProps = Properties().apply {
+        val f = rootProject.file("keystore.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    val hasSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { keystoreProps.containsKey(it) }
+    signingConfigs {
+        if (hasSigning) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // 配布用の署名は未設定。実機検証は debug を使う
+            if (hasSigning) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
