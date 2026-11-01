@@ -131,6 +131,11 @@ fun SettingsScreen(state: AppState) {
                 "文字の大きさ", text.size.toInt(),
                 listOf(32, 36, 40, 44, 48, 56, 64).map { it to it.toString() },
             ) { updateText(text.copy(size = it.toUInt())) }
+            Text("文字の色", style = MaterialTheme.typography.bodyMedium)
+            ColorSwatches(INK_COLORS, text.ink.toInt()) { updateText(text.copy(ink = it.toUInt())) }
+            Text("背景の色", style = MaterialTheme.typography.bodyMedium)
+            ColorSwatches(PAPER_COLORS, text.paper.toInt()) { updateText(text.copy(paper = it.toUInt())) }
+            ColorPreview(text.ink.toInt(), text.paper.toInt())
             Choice(
                 "行間", text.lineSpacing.toInt(),
                 listOf(130, 150, 160, 180, 200, 220).map { it to "$it%" },

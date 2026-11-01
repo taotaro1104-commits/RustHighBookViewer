@@ -302,6 +302,10 @@ pub struct PvTextStyle {
     pub typeface: PvTypeface,
     /// 行の送り幅（文字の大きさに対する割合、%。120〜240）
     pub line_spacing: u32,
+    /// 文字の色（`0xRRGGBB`）
+    pub ink: u32,
+    /// 背景の色（`0xRRGGBB`）
+    pub paper: u32,
 }
 
 /// 本をまとめたグループ（シリーズ・フォルダ単位など）

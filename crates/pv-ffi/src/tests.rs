@@ -678,6 +678,8 @@ fn text_style_changes_pages_after_reopen_and_persists() {
         size: 64,
         typeface: PvTypeface::Gothic,
         line_spacing: 160,
+        ink: 0x1C1C1C,
+        paper: 0xF5F5F5,
     })
     .unwrap();
     let (large, _, _) = pages(&core).unwrap();
@@ -688,11 +690,14 @@ fn text_style_changes_pages_after_reopen_and_persists() {
         size: 10_000,
         typeface: PvTypeface::Mincho,
         line_spacing: 9999,
+        ink: 0xFF_FFFFFF,
+        paper: 0x20_2020,
     })
     .unwrap();
     let saved = PvCore::new(data).unwrap().text_style();
     assert_eq!(saved.size, pv_container::MAX_FONT_PX);
     assert_eq!(saved.typeface, PvTypeface::Mincho);
     assert_eq!(saved.line_spacing, pv_container::MAX_LINE_SPACING);
+    assert_eq!((saved.ink, saved.paper), (0xFF_FFFF, 0x20_2020));
     assert!(core.available_typefaces().contains(&PvTypeface::Gothic));
 }

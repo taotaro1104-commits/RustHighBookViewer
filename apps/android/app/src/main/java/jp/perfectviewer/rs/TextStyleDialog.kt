@@ -43,6 +43,8 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
     val faces = remember { state.core.availableTypefaces() }
     var size by remember { mutableFloatStateOf(current.size.toFloat().coerceIn(SIZE_MIN, SIZE_MAX)) }
     var face by remember { mutableStateOf(current.typeface) }
+    var ink by remember { mutableStateOf(current.ink.toInt()) }
+    var paper by remember { mutableStateOf(current.paper.toInt()) }
     var spacing by remember { mutableFloatStateOf(current.lineSpacing.toFloat().coerceIn(SPACING_MIN, SPACING_MAX)) }
     AlertDialog(
         onDismissRequest = onClose,
@@ -73,6 +75,11 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
                     )
                     TextButton(onClick = { spacing = (spacing + SPACING_STEP).coerceAtMost(SPACING_MAX) }) { Text("広く") }
                 }
+                Text("文字の色")
+                ColorSwatches(INK_COLORS, ink) { ink = it }
+                Text("背景の色")
+                ColorSwatches(PAPER_COLORS, paper) { paper = it }
+                ColorPreview(ink, paper)
                 Text("書体")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     faces.forEach { t ->
@@ -83,7 +90,7 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
             }
         },
         confirmButton = {
-            TextButton(onClick = { onApply(PvTextStyle(size.roundToInt().toUInt(), face, spacing.roundToInt().toUInt())) }) { Text("適用") }
+            TextButton(onClick = { onApply(PvTextStyle(size.roundToInt().toUInt(), face, spacing.roundToInt().toUInt(), ink.toUInt(), paper.toUInt())) }) { Text("適用") }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("やめる") } },
     )

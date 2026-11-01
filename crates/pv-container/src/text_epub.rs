@@ -23,9 +23,10 @@ use crate::text_style::TextStyle;
 use crate::text_vertical::{draw_vertical, Canvas};
 use crate::zip_container::ZipContainer;
 
-const PAPER: u8 = 245;
-const INK: u8 = 28;
-const FOOTER_INK: u8 = 120;
+/// 描画中は「文字の濃さ」（0 = 背景、255 = 文字色）だけを持ち、最後に色を混ぜる
+const INK: u8 = 255;
+/// ページ番号は本文より薄く
+const FOOTER_INK: u8 = 140;
 const FOOTER_PX: f32 = 28.0;
 /// エントリの大きさの目安（実際の PNG の大きさではない。展開サイズの上限判定などに使われるだけ）
 const NOMINAL_SIZE: u64 = 80_000;
@@ -35,6 +36,7 @@ pub struct TextEpubContainer {
     pages: Vec<Page>,
     spec: PageSpec,
     font: Arc<FontVec>,
+    style: TextStyle,
 }
 
 impl TextEpubContainer {
@@ -79,6 +81,7 @@ impl TextEpubContainer {
             pages,
             spec,
             font,
+            style: style.clamped(),
         }))
     }
 
@@ -91,7 +94,7 @@ impl TextEpubContainer {
     fn render(&self, id: EntryId) -> Result<Vec<u8>> {
         let page = self.page(id)?;
         let (w, h) = (self.spec.width as usize, self.spec.height as usize);
-        let mut buf = vec![PAPER; w * h];
+        let mut buf = vec![0u8; w * h];
         for line in &page.lines {
             if self.spec.vertical {
                 let mut canvas = Canvas {
@@ -140,7 +143,7 @@ impl TextEpubContainer {
             &footer,
             FOOTER_INK,
         );
-        encode_png(&buf, w as u32, h as u32)
+        encode_png(&colorize(&buf, self.style), w as u32, h as u32)
     }
 }
 
@@ -184,15 +187,33 @@ fn draw_text(
     }
 }
 
-fn encode_png(gray: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
+/// 文字の濃さ（0〜255）を、背景色から文字色へのグラデーションとして RGB にする。
+fn colorize(coverage: &[u8], style: TextStyle) -> Vec<u8> {
+    let channel = |c: u32, shift: u32| ((c >> shift) & 0xFF) as i32;
+    // 濃さごとの色を先に表にしておく（画素数より、濃さの段階の方がずっと少ない）
+    let mut lut = [[0u8; 3]; 256];
+    for (cov, px) in lut.iter_mut().enumerate() {
+        for (k, shift) in [16u32, 8, 0].into_iter().enumerate() {
+            let (p, i) = (channel(style.paper, shift), channel(style.ink, shift));
+            px[k] = (p + (i - p) * cov as i32 / 255) as u8;
+        }
+    }
+    let mut rgb = Vec::with_capacity(coverage.len() * 3);
+    for &c in coverage {
+        rgb.extend_from_slice(&lut[c as usize]);
+    }
+    rgb
+}
+
+fn encode_png(rgb: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
     let mut out = Vec::with_capacity(96 * 1024);
     let mut enc = png::Encoder::new(&mut out, w, h);
-    enc.set_color(png::ColorType::Grayscale);
+    enc.set_color(png::ColorType::Rgb);
     enc.set_depth(png::BitDepth::Eight);
     enc.set_compression(png::Compression::Fast);
     let io = |e: png::EncodingError| ContainerError::Archive(e.to_string());
     let mut writer = enc.write_header().map_err(io)?;
-    writer.write_image_data(gray).map_err(io)?;
+    writer.write_image_data(rgb).map_err(io)?;
     writer.finish().map_err(io)?;
     Ok(out)
 }
@@ -211,7 +232,7 @@ fn png_head(w: u32, h: u32) -> Vec<u8> {
     let mut ihdr = Vec::with_capacity(13);
     ihdr.extend_from_slice(&w.to_be_bytes());
     ihdr.extend_from_slice(&h.to_be_bytes());
-    ihdr.extend_from_slice(&[8, 0, 0, 0, 0]); // 8 ビット・グレースケール
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]); // 8 ビット・RGB
     chunk(&mut out, b"IHDR", &ihdr);
     chunk(&mut out, b"IDAT", &[]);
     out
@@ -346,6 +367,39 @@ mod tests {
         let ch = spine_chapters(&novel());
         assert_eq!(ch.len(), 2);
         assert_eq!(ch[0][0], Block::Heading(2, "第1話".into()));
+    }
+
+    /// 文字色と背景色が、描いたページに反映される
+    #[test]
+    fn page_uses_the_chosen_colors() {
+        if font_for(Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let style = TextStyle {
+            ink: 0xFF_0000,
+            paper: 0x00_00FF,
+            ..TextStyle::default()
+        };
+        let Ok(Ok(c)) = TextEpubContainer::try_open_with(novel(), style) else {
+            panic!("text epub should open");
+        };
+        let data = c.read(EntryId(0)).unwrap();
+        let mut dec = png::Decoder::new(std::io::Cursor::new(data.to_vec()))
+            .read_info()
+            .unwrap();
+        let mut img = vec![0u8; dec.output_buffer_size().unwrap()];
+        let info = dec.next_frame(&mut img).unwrap();
+        assert_eq!(info.color_type, png::ColorType::Rgb);
+        let px: &[[u8; 3]] = img.as_chunks::<3>().0;
+        assert_eq!(px[0], [0, 0, 255], "角は背景色");
+        // 文字のある場所には、背景色（青）から文字色（赤）への途中の色や、文字色そのものがある
+        assert!(
+            px.iter().any(|p| p[0] > 200 && p[2] < 60),
+            "文字色の画素がある"
+        );
+        // 文字色と背景色以外の成分（緑）は出ない
+        assert!(px.iter().all(|p| p[1] == 0));
     }
 
     /// 文字を大きくするとページ数が増え、書体を変えても開ける（明朝体が無い環境ではゴシック体で代用）

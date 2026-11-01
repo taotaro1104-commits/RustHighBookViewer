@@ -11,6 +11,9 @@ pub const DEFAULT_FONT_PX: u32 = 44;
 pub const MIN_LINE_SPACING: u32 = 120;
 pub const MAX_LINE_SPACING: u32 = 240;
 pub const DEFAULT_LINE_SPACING: u32 = 160;
+/// 文字色・背景色の既定（`0xRRGGBB`）
+pub const DEFAULT_INK: u32 = 0x1C1C1C;
+pub const DEFAULT_PAPER: u32 = 0xF5F5F5;
 
 /// 書体の種類
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -31,6 +34,10 @@ pub struct TextStyle {
     pub typeface: Typeface,
     /// 行の送り幅（文字の大きさに対する割合、%）
     pub line_spacing: u32,
+    /// 文字の色（`0xRRGGBB`）
+    pub ink: u32,
+    /// 背景（紙）の色（`0xRRGGBB`）
+    pub paper: u32,
 }
 
 impl Default for TextStyle {
@@ -39,6 +46,8 @@ impl Default for TextStyle {
             font_px: DEFAULT_FONT_PX,
             typeface: Typeface::Gothic,
             line_spacing: DEFAULT_LINE_SPACING,
+            ink: DEFAULT_INK,
+            paper: DEFAULT_PAPER,
         }
     }
 }
@@ -49,6 +58,8 @@ impl TextStyle {
         Self {
             font_px: self.font_px.clamp(MIN_FONT_PX, MAX_FONT_PX),
             line_spacing: self.line_spacing.clamp(MIN_LINE_SPACING, MAX_LINE_SPACING),
+            ink: self.ink & 0xFF_FFFF,
+            paper: self.paper & 0xFF_FFFF,
             ..self
         }
     }
@@ -65,6 +76,8 @@ mod tests {
                 font_px: px,
                 typeface: Typeface::Mincho,
                 line_spacing: 160,
+                ink: 0,
+                paper: 0,
             }
             .clamped()
             .font_px
@@ -97,11 +110,24 @@ mod tests {
             TextStyle {
                 font_px: 52,
                 typeface: Typeface::Mincho,
-                line_spacing: DEFAULT_LINE_SPACING
+                line_spacing: DEFAULT_LINE_SPACING,
+                ink: DEFAULT_INK,
+                paper: DEFAULT_PAPER
             }
         );
         // 欠けている項目は既定値
         let d: TextStyle = serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(d, TextStyle::default());
+    }
+
+    #[test]
+    fn colors_are_masked_to_24_bits() {
+        let s = TextStyle {
+            ink: 0xFFAB_CDEF,
+            paper: 0x0100_0000,
+            ..TextStyle::default()
+        }
+        .clamped();
+        assert_eq!((s.ink, s.paper), (0xAB_CDEF, 0));
     }
 }

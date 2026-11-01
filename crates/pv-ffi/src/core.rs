@@ -116,6 +116,8 @@ impl PvCore {
             size: t.font_px,
             typeface: t.typeface.into(),
             line_spacing: t.line_spacing,
+            ink: t.ink,
+            paper: t.paper,
         }
     }
 
@@ -128,6 +130,8 @@ impl PvCore {
             font_px: style.size,
             typeface: style.typeface.into(),
             line_spacing: style.line_spacing,
+            ink: style.ink,
+            paper: style.paper,
         }
         .clamped();
         updated.save(&self.settings_path).map_err(PvError::new)?;

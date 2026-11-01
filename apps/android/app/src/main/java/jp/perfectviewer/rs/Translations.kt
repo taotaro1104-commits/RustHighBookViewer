@@ -202,6 +202,10 @@ internal val TRANSLATIONS: Map<String, List<String>> = buildMap {
     e("SD カード", "SD card", "SD 卡", "SD 카드", "Tarjeta SD")
 
     // --- 文字の設定（TextStyleDialog）
+    e("文字の色", "Text color", "文字颜色", "글자 색", "Color del texto")
+    e("背景の色", "Background color", "背景颜色", "배경 색", "Color de fondo")
+    e("文字の色と背景の色が近く、読みにくくなります。", "The text and background colors are too close, so it will be hard to read.", "文字颜色与背景颜色太接近，会难以阅读。", "글자 색과 배경 색이 비슷해서 읽기 어렵습니다.", "El color del texto y el del fondo son muy parecidos y costará leer.")
+    e("吾輩は猫である。名前はまだ無い。", "I am a cat. As yet I have no name.", "吾輩是猫。名字还没有。", "나는 고양이로소이다. 이름은 아직 없다.", "Soy un gato. Aún no tengo nombre.")
     e("行間  {1}%", "Line spacing  {1}%", "行距  {1}%", "줄 간격  {1}%", "Interlineado  {1}%")
     e("行間", "Line spacing", "行距", "줄 간격", "Interlineado")
     e("狭く", "Tighter", "缩小", "좁게", "Menos")
