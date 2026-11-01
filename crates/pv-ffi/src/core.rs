@@ -5,7 +5,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use pv_container::{open_source_with, EntryKind, ExtractGuard};
+use pv_container::{
+    kind_from_path, open_source_with, scan_books, EntryKind, ExtractGuard, FolderContainer,
+    ScanKind,
+};
 use pv_core::{
     make_thumbnail_from, BookOverride, BookSession, Container, DiskCache, FileSource, Settings,
     Source,
@@ -18,6 +21,21 @@ use crate::tree::{PvTree, TreeContainer};
 use crate::types::*;
 
 const THUMB_EDGE: u32 = 256;
+/// 一括読み込みで扱う本の数の上限
+const MAX_SCAN_BOOKS: usize = 5000;
+
+/// 本の題名: フォルダは名前、書庫ファイルは拡張子を除いた名前。
+fn local_title(p: &Path, strip_ext: bool) -> String {
+    let name = if strip_ext {
+        p.file_stem()
+    } else {
+        p.file_name()
+    };
+    name.map_or_else(
+        || p.to_string_lossy().into_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    )
+}
 
 #[derive(uniffi::Object)]
 pub struct PvCore {
@@ -105,7 +123,7 @@ impl PvCore {
         title: String,
     ) -> PvResult<Arc<PvReader>> {
         self.cancel.store(false, Ordering::Relaxed);
-        let src = source_from_fd(fd).map_err(PvError::new)?;
+        let src = source_from_fd(fd).map_err(PvError::open)?;
         self.open_source_inner(src, uri, title)
     }
 
@@ -117,16 +135,46 @@ impl PvCore {
         title: String,
     ) -> PvResult<Arc<PvReader>> {
         self.cancel.store(false, Ordering::Relaxed);
-        let container = TreeContainer::from_tree(tree).map_err(PvError::new)?;
+        let container = TreeContainer::from_tree(tree).map_err(PvError::open)?;
         let key = BookKey::from_listing(container.listing());
         self.open_container_inner(Arc::new(container), key, uri, title)
+    }
+
+    /// 端末内のパスで開く。フォルダなら直下の画像を 1 冊に、書庫ファイルならその 1 冊を開く
+    /// （「すべてのファイルへのアクセス」権限があるとき用。SAF より速い）。
+    pub fn open_local(self: Arc<Self>, path: String) -> PvResult<Arc<PvReader>> {
+        self.cancel.store(false, Ordering::Relaxed);
+        let p = self.prepare_local(&path)?;
+        self.open_container_inner(p.container, p.key, p.uri, p.title)
+    }
+
+    /// フォルダ以下を探して、本の単位に分けて返す。
+    /// 各フォルダの直下の画像をまとめて 1 冊、EPUB などの書庫ファイルは 1 つにつき 1 冊。サブフォルダも同様。
+    pub fn scan_folder(&self, path: String) -> PvResult<Vec<PvScanItem>> {
+        let items = scan_books(Path::new(&path), MAX_SCAN_BOOKS).map_err(PvError::open)?;
+        Ok(items
+            .into_iter()
+            .map(|i| PvScanItem {
+                title: local_title(&i.path, i.kind == ScanKind::Archive),
+                is_folder: i.kind == ScanKind::Images,
+                path: i.path.to_string_lossy().into_owned(),
+            })
+            .collect())
+    }
+
+    /// 開かずに本棚へ登録する（ページ数とサムネイルまで）。フォルダ一括読み込み用。
+    pub fn register_local(&self, path: String) -> PvResult<PvBook> {
+        self.cancel.store(false, Ordering::Relaxed);
+        let p = self.prepare_local(&path)?;
+        let (book, _) = self.register_container(p.container.as_ref(), &p.key, p.uri, p.title)?;
+        Ok(PvBook::from(&book))
     }
 
     /// ファイルパスで開く（テスト・デスクトップ向け）。
     pub fn open_path(self: Arc<Self>, path: String) -> PvResult<Arc<PvReader>> {
         self.cancel.store(false, Ordering::Relaxed);
         let p = Path::new(&path);
-        let src: Arc<dyn Source> = Arc::new(FileSource::open(p).map_err(PvError::new)?);
+        let src: Arc<dyn Source> = Arc::new(FileSource::open(p).map_err(PvError::open)?);
         let title = p
             .file_stem()
             .map_or_else(|| path.clone(), |s| s.to_string_lossy().into_owned());
@@ -183,7 +231,96 @@ impl PvCore {
     }
 }
 
+/// パスから開く準備ができたもの
+struct Prepared {
+    container: Arc<dyn Container>,
+    key: BookKey,
+    uri: String,
+    title: String,
+}
+
 impl PvCore {
+    fn prepare_local(&self, path: &str) -> PvResult<Prepared> {
+        let p = Path::new(path);
+        let uri = format!("file://{path}");
+        if p.is_dir() {
+            let container = FolderContainer::open_flat(p).map_err(PvError::open)?;
+            // 本の識別子は画像だけの「相対パス:サイズ」一覧から作る
+            let listing = container
+                .entries()
+                .iter()
+                .filter(|e| e.kind == EntryKind::Image)
+                .map(|e| (e.path.clone(), e.size))
+                .collect();
+            return Ok(Prepared {
+                container: Arc::new(container),
+                key: BookKey::from_listing(listing),
+                uri,
+                title: local_title(p, false),
+            });
+        }
+        let src: Arc<dyn Source> = Arc::new(FileSource::open(p).map_err(PvError::open)?);
+        let mut head = vec![0u8; HEAD_LEN.min(src.len() as usize)];
+        let n = read_fully(src.as_ref(), &mut head).map_err(PvError::new)?;
+        let key = BookKey::from_head(src.len(), &head[..n]);
+        let guard = ExtractGuard {
+            cancel: Arc::clone(&self.cancel),
+            ..ExtractGuard::default()
+        };
+        let container = open_source_with(src, &self.scratch, &guard).map_err(PvError::open)?;
+        Ok(Prepared {
+            container,
+            key,
+            uri,
+            title: local_title(p, true),
+        })
+    }
+
+    /// 本棚への登録（ページ数の確認・ライブラリへの保存・サムネイル）。開く処理と共通。
+    fn register_container(
+        &self,
+        container: &dyn Container,
+        key: &BookKey,
+        uri: String,
+        title: String,
+    ) -> PvResult<(pv_library::Book, usize)> {
+        // ページ（画像）の数。0 冊分のものを本棚に登録しないよう、先に確かめる
+        let page_count = container
+            .entries()
+            .iter()
+            .filter(|e| e.kind == EntryKind::Image)
+            .count();
+        if page_count == 0 {
+            return Err(PvError::open(pv_core::CoreError::NoPages));
+        }
+        let book = self
+            .library
+            .upsert_book(
+                &NewBook {
+                    uri,
+                    size: key.size,
+                    head_hash: key.head_hash.clone(),
+                    title,
+                    page_count,
+                },
+                pv_library::now_ms(),
+            )
+            .map_err(PvError::new)?;
+        // 本棚用サムネイル（SAF では後から開き直せない場合があるので、登録時に作る）
+        let tkey = thumb_key(&key.head_hash, key.size);
+        if self.disk.get(tkey).is_none() {
+            match make_thumbnail_from(container, THUMB_EDGE) {
+                Ok(bmp) => {
+                    if let Err(e) = self.disk.put(tkey, &bmp) {
+                        eprintln!("thumbnail not cached: {e}");
+                    }
+                }
+                Err(e) => eprintln!("thumbnail not created: {e}"),
+            }
+        }
+        Ok((book, page_count))
+    }
+
     fn open_source_inner(
         &self,
         src: Arc<dyn Source>,
@@ -200,7 +337,7 @@ impl PvCore {
             ..ExtractGuard::default()
         };
         let container: Arc<dyn Container> =
-            open_source_with(src, &self.scratch, &guard).map_err(PvError::new)?;
+            open_source_with(src, &self.scratch, &guard).map_err(PvError::open)?;
         self.open_container_inner(container, key, uri, title)
     }
 
@@ -212,30 +349,9 @@ impl PvCore {
         title: String,
     ) -> PvResult<Arc<PvReader>> {
         let settings = self.settings.lock().clone();
-        // ページ（画像）の数。0 冊分のものを本棚に登録しないよう、先に確かめる
-        let page_count = container
-            .entries()
-            .iter()
-            .filter(|e| e.kind == EntryKind::Image)
-            .count();
-        if page_count == 0 {
-            return Err(PvError::new("画像が見つかりません"));
-        }
-
+        let (book, page_count) =
+            self.register_container(container.as_ref(), &key, uri, title.clone())?;
         let now = pv_library::now_ms();
-        let book = self
-            .library
-            .upsert_book(
-                &NewBook {
-                    uri,
-                    size: key.size,
-                    head_hash: key.head_hash.clone(),
-                    title: title.clone(),
-                    page_count,
-                },
-                now,
-            )
-            .map_err(PvError::new)?;
         self.library
             .touch_opened(book.id, now)
             .map_err(PvError::new)?;
@@ -254,7 +370,7 @@ impl PvCore {
             &settings,
             cached.as_deref(),
         )
-        .map_err(PvError::new)?;
+        .map_err(PvError::open)?;
 
         // 書庫ごとの設定上書きを復元してから、読書位置へ移動する
         if let Ok(Some(json)) = self.library.book_settings(book.id) {
@@ -282,18 +398,6 @@ impl PvCore {
             }
         }
 
-        // 本棚用サムネイル（SAF では後から開き直せない場合があるので、開いた時点で作る）
-        let tkey = thumb_key(&key.head_hash, key.size);
-        if self.disk.get(tkey).is_none() {
-            match make_thumbnail_from(container.as_ref(), THUMB_EDGE) {
-                Ok(bmp) => {
-                    if let Err(e) = self.disk.put(tkey, &bmp) {
-                        eprintln!("thumbnail not cached: {e}");
-                    }
-                }
-                Err(e) => eprintln!("thumbnail not created: {e}"),
-            }
-        }
         Ok(Arc::new(PvReader::new(
             session,
             Arc::clone(&self.library),
@@ -302,6 +406,12 @@ impl PvCore {
             sizes_saved,
         )))
     }
+}
+
+/// 拡張子から画像ファイルか判定する（フォルダの閲覧画面で、画像のあるフォルダを見分けるため）。
+#[uniffi::export]
+pub fn is_image_file_name(name: String) -> bool {
+    kind_from_path(&name) == EntryKind::Image
 }
 
 /// read_at は短く返すことがあるので、埋まるまで読む。

@@ -378,3 +378,129 @@ fn bookmarks_can_be_added_and_removed() {
     // 無いしおりの削除はエラーにしない
     r.remove_bookmark(p).unwrap();
 }
+
+#[test]
+fn folder_by_path_opens_only_its_own_images_and_keeps_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("漫画 テスト");
+    for (sub, name, v) in [
+        (".", "000.png", 5u8),
+        ("第1巻", "001.png", 10),
+        ("第1巻", "002.png", 20),
+        ("第2巻", "001.png", 30),
+    ] {
+        std::fs::create_dir_all(root.join(sub)).unwrap();
+        std::fs::write(root.join(sub).join(name), png(60, 90, v)).unwrap();
+    }
+    std::fs::write(root.join("メモ.txt"), b"memo").unwrap();
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    let path = root.to_string_lossy().into_owned();
+
+    // サブフォルダの画像は含めない（別の本として扱う）
+    let r = core.clone().open_local(path.clone()).unwrap();
+    assert_eq!(r.page_count(), 1);
+    assert_eq!(r.title(), "漫画 テスト");
+    let id = r.book_id();
+    drop(r);
+
+    // 同じフォルダは同じ本（読書位置・しおりを引き継ぐ）
+    let again = core.clone().open_local(path).unwrap();
+    assert_eq!(again.book_id(), id);
+    let books = core.list_books(String::new(), false, PvSort::Name).unwrap();
+    assert_eq!(books.len(), 1);
+}
+
+#[test]
+fn folder_errors_are_readable_japanese() {
+    let dir = tempfile::tempdir().unwrap();
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    let msg = |r: PvResult<Arc<PvReader>>| match r {
+        Err(PvError::Failed { msg }) => msg,
+        Ok(_) => panic!("expected error"),
+    };
+
+    let empty = dir.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    let m = msg(core
+        .clone()
+        .open_local(empty.to_string_lossy().into_owned()));
+    assert!(m.contains("画像が見つかりません"), "{m}");
+
+    let notes = dir.path().join("notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    std::fs::write(notes.join("a.txt"), b"x").unwrap();
+    let m = msg(core
+        .clone()
+        .open_local(notes.to_string_lossy().into_owned()));
+    assert!(m.contains("画像が見つかりません"), "{m}");
+
+    let m = msg(core.open_local(dir.path().join("nope").to_string_lossy().into_owned()));
+    assert!(m.contains("見つかりません"), "{m}");
+}
+
+#[test]
+fn image_file_names_are_recognized_by_extension() {
+    assert!(is_image_file_name("001.JPG".into()));
+    assert!(is_image_file_name("a/b/p.webp".into()));
+    assert!(!is_image_file_name("memo.txt".into()));
+    assert!(!is_image_file_name("noext".into()));
+}
+
+#[test]
+fn scan_and_register_split_a_tree_into_books() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lib");
+    let put = |rel: &str, bytes: Vec<u8>| {
+        let p = root.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, bytes).unwrap();
+    };
+    put("top.png", png(60, 90, 1));
+    put("第1巻/a.png", png(60, 90, 2));
+    put("第1巻/b.png", png(60, 90, 3));
+    put("第2巻/c.png", png(60, 90, 4));
+    put("文字だけ/note.txt", b"t".to_vec());
+    // 画像を持つ書庫（CBZ）は 1 冊
+    let cbz = dir.path().join("x.cbz");
+    make_cbz(&cbz, 1);
+    std::fs::copy(&cbz, root.join("第2巻/vol.cbz")).unwrap();
+
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    let items = core
+        .scan_folder(root.to_string_lossy().into_owned())
+        .unwrap();
+    let got: Vec<_> = items
+        .iter()
+        .map(|i| (i.title.as_str(), i.is_folder))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("lib", true),
+            ("第1巻", true),
+            ("第2巻", true),
+            ("vol", false)
+        ]
+    );
+
+    // 一括登録: 開かずに本棚へ入り、ページ数が分かる
+    for i in &items {
+        core.register_local(i.path.clone()).unwrap();
+    }
+    let books = core.list_books(String::new(), false, PvSort::Name).unwrap();
+    assert_eq!(books.len(), 4);
+    let pages = |t: &str| books.iter().find(|b| b.title == t).unwrap().page_count;
+    assert_eq!(
+        (pages("lib"), pages("第1巻"), pages("第2巻"), pages("vol")),
+        (1, 2, 1, 1)
+    );
+    assert!(books.iter().all(|b| core.thumbnail(b.id).is_some()));
+    // 登録し直しても増えない
+    core.register_local(items[1].path.clone()).unwrap();
+    assert_eq!(
+        core.list_books(String::new(), false, PvSort::Name)
+            .unwrap()
+            .len(),
+        4
+    );
+}

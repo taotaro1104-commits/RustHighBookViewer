@@ -13,6 +13,64 @@ impl PvError {
     pub fn new(e: impl std::fmt::Display) -> Self {
         PvError::Failed { msg: e.to_string() }
     }
+
+    /// 「本を開く」で起きたエラーを、利用者に原因が伝わる日本語にして包む。
+    pub fn open(e: impl std::error::Error + 'static) -> Self {
+        PvError::Failed {
+            msg: describe_error(&e),
+        }
+    }
+}
+
+/// エラーの原因を日本語で説明する。分からないものは元のメッセージを添える。
+pub fn describe_error(e: &(dyn std::error::Error + 'static)) -> String {
+    use pv_container::ContainerError;
+    use pv_core::CoreError;
+    if let Some(c) = e.downcast_ref::<CoreError>() {
+        return match c {
+            CoreError::Container(inner) => describe_error(inner),
+            CoreError::Io(inner) => describe_error(inner),
+            CoreError::NoPages => "画像が見つかりません".into(),
+            CoreError::Cancelled => "キャンセルしました".into(),
+            other => format!("開けませんでした（{other}）"),
+        };
+    }
+    if let Some(c) = e.downcast_ref::<ContainerError>() {
+        return match c {
+            ContainerError::Io(inner) => describe_error(inner),
+            ContainerError::Unsupported => {
+                "対応していない形式です（ZIP/CBZ・7z・RAR・EPUB・フォルダに対応）".into()
+            }
+            ContainerError::Cancelled => "キャンセルしました".into(),
+            ContainerError::LimitExceeded(what) => match *what {
+                "entry count" => "ファイルが多すぎて開けません（安全のための上限）",
+                "entry size" => "大きすぎるファイルが含まれています（安全のための上限）",
+                "total size" => "展開後の合計サイズが大きすぎます（安全のための上限）",
+                "archive size" => "書庫が大きすぎます（2GB まで）",
+                "disk space" => "端末の空き容量が足りません",
+                "compression ratio" => "圧縮率が異常なため開きません（安全のため）",
+                _ => "安全のための上限を超えています",
+            }
+            .into(),
+            ContainerError::Zip(inner) => format!("書庫が壊れているようです（{inner}）"),
+            ContainerError::Archive(inner) => {
+                format!(
+                    "書庫を読めません。壊れているか、パスワード付きの可能性があります（{inner}）"
+                )
+            }
+            ContainerError::NotFound(_) => "書庫の中身が見つかりません".into(),
+        };
+    }
+    if let Some(io) = e.downcast_ref::<std::io::Error>() {
+        return match io.kind() {
+            std::io::ErrorKind::PermissionDenied => {
+                "アクセス権限がありません。設定でファイルへのアクセスを許可してください".into()
+            }
+            std::io::ErrorKind::NotFound => "ファイルまたはフォルダが見つかりません".into(),
+            _ => format!("読み込みに失敗しました（{io}）"),
+        };
+    }
+    e.to_string()
 }
 
 pub type PvResult<T> = Result<T, PvError>;
@@ -84,6 +142,15 @@ pub struct PvBook {
     pub status: PvStatus,
     pub favorite: bool,
     pub last_opened_at: Option<i64>,
+}
+
+/// フォルダ一括読み込みで見つかった 1 冊
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PvScanItem {
+    pub path: String,
+    pub title: String,
+    /// true = フォルダ直下の画像をまとめた本、false = 書庫ファイル
+    pub is_folder: bool,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -342,6 +409,23 @@ impl PvAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn errors_are_described_in_japanese() {
+        use pv_container::ContainerError;
+        use pv_core::CoreError;
+        let d = |e: &(dyn std::error::Error + 'static)| describe_error(e);
+        assert!(d(&CoreError::NoPages).contains("画像が見つかりません"));
+        assert!(d(&ContainerError::Unsupported).contains("対応していない形式"));
+        assert!(d(&ContainerError::LimitExceeded("entry count")).contains("多すぎ"));
+        assert!(d(&ContainerError::LimitExceeded("disk space")).contains("空き容量"));
+        // 入れ子（CoreError → ContainerError → io::Error）の権限エラーまで届く
+        let perm = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let nested = CoreError::Container(ContainerError::Io(perm));
+        assert!(d(&nested).contains("アクセス権限"));
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert!(d(&missing).contains("見つかりません"));
+    }
 
     #[test]
     fn navigation_actions_roundtrip() {

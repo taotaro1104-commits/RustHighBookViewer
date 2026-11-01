@@ -266,6 +266,13 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                     surfaceHolder[0] = v
                     v.onViewport = { w, h -> viewport = w to h; requestIfNeeded() }
                     v.onTapZone = { z -> perform(reader.tapAction(z.toUByte())) }
+                    // ルーペ中の短いタップ: ルーペを解除して、通常のタップ（ページ送りなど）として動かす
+                    v.onMagnifierTap = { z ->
+                        magnifier = false
+                        perform(reader.tapAction(z.toUByte()))
+                    }
+                    // 左右フリック: 指が右へ = 左側タップ、左へ = 右側タップと同じ（綴じ方向に合わせて進む向きが変わる）
+                    v.onFlick = { dir -> perform(reader.tapAction((if (dir > 0) 3 else 5).toUByte())) }
                     v.onDoubleTap = {
                         // 既定の割り当ては ZoomIn。ここでは 1x ↔ 2.5x の切り替えとして扱う
                         if (reader.doubleTapAction() == PvAction.ZOOM_IN) v.setZoom(if (v.currentZoom() > 1f) 1f else 2.5f)
@@ -328,6 +335,8 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    // 本棚へ戻らずに、フォルダを選び直して別の本を開く
+                    TextButton(onClick = { uiVisible = false; state.pickFolderHandler?.invoke() }) { Text("📁 フォルダ参照") }
                     Box {
                         TextButton(onClick = { modeMenu = true }) {
                             Text(
@@ -384,7 +393,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                     TextButton(onClick = { showJump = true }) { Text("ページ指定") }
                     TextButton(onClick = { showGrid = true }) { Text("一覧") }
                     TextButton(onClick = { showColor = true }) { Text("色調整") }
-                    FilterChip(selected = magnifier, onClick = { magnifier = !magnifier; if (magnifier) { uiVisible = false; state.toast("ルーペ: 指でなぞって拡大。戻るキーで終了") } }, label = { Text("ルーペ") })
+                    FilterChip(selected = magnifier, onClick = { magnifier = !magnifier; if (magnifier) { uiVisible = false; state.toast("ルーペ: 押したままなぞって拡大。短くタップで終了") } }, label = { Text("ルーペ") })
                     Box {
                         TextButton(onClick = { autoMenu = true }) { Text(if (autoSec > 0) "自動 ${autoSec}秒" else "自動めくり") }
                         DropdownMenu(expanded = autoMenu, onDismissRequest = { autoMenu = false }) {

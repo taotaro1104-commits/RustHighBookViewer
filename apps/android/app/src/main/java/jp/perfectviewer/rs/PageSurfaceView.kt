@@ -12,6 +12,7 @@ import android.view.ScaleGestureDetector
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
@@ -28,6 +29,12 @@ class PageSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     var onViewport: (Int, Int) -> Unit = { _, _ -> }
     /** ズーム倍率が変わった */
     var onZoom: (Float) -> Unit = {}
+    /** ルーペ中に短くタップされた（ルーペを解除し、通常のタップとして扱うため。引数は 3x3 のゾーン） */
+    var onMagnifierTap: (Int) -> Unit = {}
+
+    /** 左右フリック（-1 = 指が左へ、1 = 指が右へ）。横にはみ出していない（拡大していない）ときだけ */
+    var onFlick: (Int) -> Unit = {}
+
     /** 端を超えてスクロールされた (+1: 次, -1: 前) */
     var onEdgeScroll: (Int) -> Unit = {}
 
@@ -49,6 +56,17 @@ class PageSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             draw()
         }
     private var loupeActive = false
+
+    /** ルーペ中の今回のタッチが、ルーペ中に始まったものか（長押しで入った直後は、指が既に触れている） */
+    private var loupeGesture = false
+    private var loupeDownX = 0f
+    private var loupeDownY = 0f
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+    /** 押し続けたらルーペを出すまでの時間。これより短く離せばタップ */
+    private val showLoupe = Runnable {
+        loupeActive = true
+        draw()
+    }
     private var loupeX = 0f
     private var loupeY = 0f
     private val loupeRadius = 84f * resources.displayMetrics.density
@@ -167,9 +185,7 @@ class PageSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         override fun onDown(e: MotionEvent) = true
 
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            val col = min(2, max(0, (e.x / max(1, width) * 3).toInt()))
-            val row = min(2, max(0, (e.y / max(1, height) * 3).toInt()))
-            onTapZone(row * 3 + col)
+            onTapZone(zoneAt(e.x, e.y))
             return true
         }
 
@@ -180,6 +196,16 @@ class PageSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
         override fun onLongPress(e: MotionEvent) {
             onLongPress()
+        }
+
+        override fun onFling(e1: MotionEvent?, e2: MotionEvent, vx: Float, vy: Float): Boolean {
+            val start = e1 ?: return false
+            val dx = e2.x - start.x
+            val dy = e2.y - start.y
+            if (limitX() != 0f || abs(vx) < FLICK_MIN_VELOCITY) return false
+            if (abs(dx) < FLICK_MIN_DISTANCE || abs(dx) < abs(dy) * 1.5f) return false
+            onFlick(if (dx > 0) 1 else -1)
+            return true
         }
 
         override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
@@ -212,13 +238,7 @@ class PageSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     })
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (magnifier) {
-            loupeX = event.x
-            loupeY = event.y
-            loupeActive = event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL
-            draw()
-            return true
-        }
+        if (magnifier) return handleMagnifierTouch(event)
         if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
             overscroll = 0f
             edgeFired = false
@@ -228,7 +248,57 @@ class PageSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
         return true
     }
 
+    /**
+     * ルーペ中のタッチ。押し続ける・なぞるとルーペを表示し、短いタップなら解除してタップ操作に渡す。
+     */
+    private fun handleMagnifierTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                loupeGesture = true
+                loupeDownX = e.x
+                loupeDownY = e.y
+                loupeX = e.x
+                loupeY = e.y
+                loupeActive = false
+                postDelayed(showLoupe, LOUPE_HOLD_MS)
+            }
+            MotionEvent.ACTION_MOVE -> {
+                loupeX = e.x
+                loupeY = e.y
+                // 長押しでルーペに入った直後（DOWN を見ていない）や、なぞり始めたらすぐ表示する
+                if (!loupeActive && (!loupeGesture || hypot(e.x - loupeDownX, e.y - loupeDownY) > touchSlop)) {
+                    removeCallbacks(showLoupe)
+                    loupeActive = true
+                }
+                if (loupeActive) draw()
+            }
+            MotionEvent.ACTION_UP -> {
+                removeCallbacks(showLoupe)
+                val wasTap = loupeGesture && !loupeActive
+                loupeActive = false
+                loupeGesture = false
+                if (wasTap) onMagnifierTap(zoneAt(e.x, e.y)) else draw()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(showLoupe)
+                loupeActive = false
+                loupeGesture = false
+                draw()
+            }
+        }
+        return true
+    }
+
+    private fun zoneAt(x: Float, y: Float): Int {
+        val col = min(2, max(0, (x / max(1, width) * 3).toInt()))
+        val row = min(2, max(0, (y / max(1, height) * 3).toInt()))
+        return row * 3 + col
+    }
+
     companion object {
+        private const val LOUPE_HOLD_MS = 180L
+        private const val FLICK_MIN_VELOCITY = 600f
+        private const val FLICK_MIN_DISTANCE = 120f
         const val MIN_ZOOM = 1f
         const val MAX_ZOOM = 8f
         const val LOUPE_ZOOM = 2f

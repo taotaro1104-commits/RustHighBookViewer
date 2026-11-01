@@ -72,7 +72,10 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
         ) {
             if (state.busy) {
                 // 大きな 7z / RAR は展開に時間がかかるため、途中でやめられるようにする
-                Button(onClick = { state.cancelOpen() }) { Text("読み込み中… キャンセル") }
+                val prog = state.importProgress
+                Button(onClick = { state.cancelOpen() }) {
+                    Text(if (prog != null) "登録中 ${prog.first + 1}/${prog.second}… キャンセル" else "読み込み中… キャンセル")
+                }
             } else {
                 Button(onClick = onPickFile) { Text("ファイル") }
             }
