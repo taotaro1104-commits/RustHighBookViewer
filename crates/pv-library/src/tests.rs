@@ -235,3 +235,29 @@ fn persists_across_reopen_with_wal() {
     let l = Library::open(&path).unwrap();
     assert_eq!(l.get_progress(id).unwrap().unwrap().page_idx, 2);
 }
+
+#[test]
+fn page_sizes_roundtrip_and_reject_stale_cache() {
+    let l = lib();
+    let b = l.upsert_book(&nb("/a.cbz", "h1", "A", 3), 1).unwrap();
+    assert_eq!(l.page_sizes(b.id, 3).unwrap(), None);
+
+    let sizes = vec![(600, 900), (900, 600), (u32::MAX, 1)];
+    l.save_page_sizes(b.id, &sizes).unwrap();
+    assert_eq!(l.page_sizes(b.id, 3).unwrap(), Some(sizes.clone()));
+    // ページ数が変わっていたら、古いキャッシュとして使わない
+    assert_eq!(l.page_sizes(b.id, 4).unwrap(), None);
+
+    // 上書き
+    l.save_page_sizes(b.id, &[(1, 2)]).unwrap();
+    assert_eq!(l.page_sizes(b.id, 1).unwrap(), Some(vec![(1, 2)]));
+}
+
+#[test]
+fn page_sizes_are_removed_with_the_book() {
+    let l = lib();
+    let b = l.upsert_book(&nb("/a.cbz", "h1", "A", 1), 1).unwrap();
+    l.save_page_sizes(b.id, &[(10, 20)]).unwrap();
+    l.delete_book(b.id).unwrap();
+    assert_eq!(l.page_sizes(b.id, 1).unwrap(), None);
+}

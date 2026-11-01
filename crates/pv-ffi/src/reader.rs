@@ -1,5 +1,6 @@
 //! 1 冊を開いている間の窓口（BookSession のラッパー）。Kotlin の閲覧画面が使う。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +23,8 @@ pub struct PvReader {
     book_id: i64,
     title: String,
     saved_page: Mutex<Option<usize>>,
+    /// ページ寸法を DB に保存済みか（単ページ表示で開いた本を、あとで見開きにしたときに保存する）
+    sizes_saved: AtomicBool,
     /// ページ一覧のサムネイル用。セッションのロックを取らずに並列で呼べる
     thumbs: PageThumbs,
 }
@@ -32,6 +35,7 @@ impl PvReader {
         library: Arc<Library>,
         book_id: i64,
         title: String,
+        sizes_saved: bool,
     ) -> Self {
         let rx = session.events();
         let thumbs = session.thumbnailer();
@@ -51,6 +55,7 @@ impl PvReader {
             book_id,
             title,
             saved_page: Mutex::new(None),
+            sizes_saved: AtomicBool::new(sizes_saved),
             thumbs,
         }
     }
@@ -72,7 +77,16 @@ impl PvReader {
     fn after_settings_change(&self, session: MutexGuard<'_, BookSession>) {
         let json = serde_json::to_string(&Self::current_override(&session));
         let direction = session.settings().layout.direction;
+        let sizes = (!self.sizes_saved.load(Ordering::Relaxed))
+            .then(|| session.page_sizes())
+            .flatten();
         drop(session);
+        if let Some(sizes) = sizes {
+            match self.library.save_page_sizes(self.book_id, &sizes) {
+                Ok(()) => self.sizes_saved.store(true, Ordering::Relaxed),
+                Err(e) => eprintln!("page sizes not saved: {e}"),
+            }
+        }
         if let Ok(json) = json {
             if let Err(e) = self.library.set_book_settings(self.book_id, &json) {
                 eprintln!("book settings not saved: {e}");
@@ -283,6 +297,20 @@ impl PvReader {
             .into_iter()
             .map(|b| b.page_idx as u32)
             .collect())
+    }
+
+    /// 指定ページのしおりを外す。しおりが無くてもエラーにしない。
+    pub fn remove_bookmark(&self, page: u32) -> PvResult<()> {
+        let found = self
+            .library
+            .bookmarks(self.book_id)
+            .map_err(PvError::new)?
+            .into_iter()
+            .find(|b| b.page_idx == page as usize);
+        if let Some(b) = found {
+            self.library.remove_bookmark(b.id).map_err(PvError::new)?;
+        }
+        Ok(())
     }
 
     /// 処理前の元バイト列（画像の保存・共有用）。

@@ -1,6 +1,6 @@
 //! Kotlin 側へ公開する型。コアの型との変換もここに集める。
 
-use pv_core::{Action, ColorAdjust, Direction, FitMode, ViewMode};
+use pv_core::{Action, ColorAdjust, Direction, FitMode, Settings, ViewMode};
 use pv_library::{Book, ReadStatus};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -147,6 +147,60 @@ impl From<ColorAdjust> for PvColor {
             sepia: c.sepia,
             invert: c.invert,
         }
+    }
+}
+
+/// 全体の既定設定。まだ開いていない本に使われる（開いたことのある本は、本ごとの設定が優先される）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct PvSettings {
+    pub mode: PvViewMode,
+    pub direction: PvDirection,
+    /// 先頭ページ（表紙）を単独で表示する
+    pub first_page_single: bool,
+    /// 横長のページは単独で表示する
+    pub wide_page_alone: bool,
+    pub fit: PvFit,
+    /// 画像キャッシュの上限（MB）。0 なら端末メモリの 1/8
+    pub cache_mb: u32,
+    /// 先読みするスプレッド数（前・後ろ）
+    pub prefetch_back: u32,
+    pub prefetch_forward: u32,
+}
+
+pub const MAX_PREFETCH: u32 = 12;
+pub const MAX_CACHE_MB: u32 = 4096;
+
+impl From<&Settings> for PvSettings {
+    fn from(s: &Settings) -> Self {
+        Self {
+            mode: s.layout.mode.into(),
+            direction: s.layout.direction.into(),
+            first_page_single: s.layout.first_page_single,
+            wide_page_alone: s.layout.wide_page_alone,
+            fit: s.fit.into(),
+            cache_mb: s.cache.l1_bytes.map_or(0, |b| (b >> 20) as u32),
+            prefetch_back: s.cache.prefetch_back as u32,
+            prefetch_forward: s.cache.prefetch_forward as u32,
+        }
+    }
+}
+
+impl PvSettings {
+    /// 設定に反映する。範囲外の値は収める（UI や設定ファイルの不正値対策）。
+    pub fn apply_to(self, s: &Settings) -> Settings {
+        let mut out = s.clone();
+        out.layout.mode = self.mode.into();
+        out.layout.direction = self.direction.into();
+        out.layout.first_page_single = self.first_page_single;
+        out.layout.wide_page_alone = self.wide_page_alone;
+        out.fit = self.fit.into();
+        out.cache.l1_bytes = match self.cache_mb {
+            0 => None,
+            mb => Some(u64::from(mb.clamp(64, MAX_CACHE_MB)) << 20),
+        };
+        out.cache.prefetch_back = self.prefetch_back.min(MAX_PREFETCH) as usize;
+        out.cache.prefetch_forward = self.prefetch_forward.min(MAX_PREFETCH) as usize;
+        out
     }
 }
 

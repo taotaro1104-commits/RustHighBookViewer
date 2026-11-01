@@ -379,6 +379,57 @@ impl Library {
         Ok(())
     }
 
+    /// すべての本の「本ごとの設定」を消す（全体の既定設定を、読んだことのある本にも効かせ直すため）。
+    pub fn clear_book_settings(&self) -> Result<()> {
+        self.conn.lock().execute("DELETE FROM book_settings", [])?;
+        Ok(())
+    }
+
+    /// 全ページの寸法 (幅, 高さ) を保存する。同じ本の読み込みで寸法の取得を省くためのキャッシュ。
+    pub fn save_page_sizes(&self, id: BookId, sizes: &[(u32, u32)]) -> Result<()> {
+        let mut data = Vec::with_capacity(sizes.len() * 8);
+        for &(w, h) in sizes {
+            data.extend_from_slice(&w.to_le_bytes());
+            data.extend_from_slice(&h.to_le_bytes());
+        }
+        self.conn.lock().execute(
+            "INSERT INTO page_sizes (book_id, page_count, data) VALUES (?1, ?2, ?3)
+             ON CONFLICT(book_id) DO UPDATE SET page_count=?2, data=?3",
+            params![id, sizes.len() as i64, data],
+        )?;
+        Ok(())
+    }
+
+    /// 保存済みの寸法。ページ数が `expected_count` と違う（本が差し替わった）場合や、壊れている場合は None。
+    pub fn page_sizes(&self, id: BookId, expected_count: usize) -> Result<Option<Vec<(u32, u32)>>> {
+        let row: Option<(i64, Vec<u8>)> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT page_count, data FROM page_sizes WHERE book_id=?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(count, data)| {
+            if count as usize != expected_count || data.len() != expected_count * 8 {
+                return None;
+            }
+            Some(
+                data.as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| {
+                        (
+                            u32::from_le_bytes([c[0], c[1], c[2], c[3]]),
+                            u32::from_le_bytes([c[4], c[5], c[6], c[7]]),
+                        )
+                    })
+                    .collect(),
+            )
+        }))
+    }
+
     pub fn book_settings(&self, id: BookId) -> Result<Option<String>> {
         Ok(self
             .conn

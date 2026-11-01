@@ -25,6 +25,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,14 +51,14 @@ private enum class Tab(val label: String) { RECENT("履歴"), ALL("すべて"), 
 fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Unit, onOpen: (PvBook) -> Unit) {
     var tab by remember { mutableStateOf(Tab.RECENT) }
     var query by remember { mutableStateOf("") }
-    val books by produceState(emptyList<PvBook>(), tab, query, state.shelfVersion) {
+    val books by produceState(emptyList<PvBook>(), tab, query, state.shelfVersion, state.shelfSort) {
         value = withContext(Dispatchers.IO) {
             runCatching {
                 when (tab) {
                     Tab.RECENT -> state.core.recentBooks(200u)
                         .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
-                    Tab.ALL -> state.core.listBooks(query, false, PvSort.NAME)
-                    Tab.FAVORITES -> state.core.listBooks(query, true, PvSort.NAME)
+                    Tab.ALL -> state.core.listBooks(query, false, state.shelfSort)
+                    Tab.FAVORITES -> state.core.listBooks(query, true, state.shelfSort)
                 }
             }.getOrDefault(emptyList())
         }
@@ -76,6 +77,7 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
                 Button(onClick = onPickFile) { Text("ファイル") }
             }
             Button(onClick = onPickFolder, enabled = !state.busy) { Text("フォルダ") }
+            TextButton(onClick = { state.showSettings = true }) { Text("設定") }
             Tab.entries.forEach { t ->
                 FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(t.label) })
             }

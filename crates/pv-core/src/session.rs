@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -52,6 +52,8 @@ pub struct BookSession {
     last_view: Mutex<Option<(Size, f32)>>,
     settings: Settings,
     metas: Vec<PageMeta>,
+    /// `metas` が実際の寸法か（false なら仮寸法）
+    sizes_known: bool,
     spreads: Vec<Spread>,
     cursor: usize,
 }
@@ -97,6 +99,17 @@ impl BookSession {
         book_id: u64,
         settings: &Settings,
     ) -> Result<Self> {
+        Self::open_container_with_sizes(container, book_id, settings, None)
+    }
+
+    /// `cached_sizes`（前回取得したページ寸法）が全ページ分あれば、寸法の取得（全ページの先頭読み）を省く。
+    /// ページ数が合わない場合は古いキャッシュとして無視する。
+    pub fn open_container_with_sizes(
+        container: Arc<dyn Container>,
+        book_id: u64,
+        settings: &Settings,
+        cached_sizes: Option<&[(u32, u32)]>,
+    ) -> Result<Self> {
         let pages: Vec<_> = container
             .entries()
             .iter()
@@ -118,8 +131,15 @@ impl BookSession {
         });
         let (tx, rx) = crossbeam_channel::unbounded();
         let workers = std::thread::available_parallelism().map_or(2, |n| n.get().clamp(2, 4));
+        let cached = cached_sizes.filter(|c| c.len() == inner.pages.len());
+        let (metas, sizes_known) = match cached {
+            Some(sizes) => (metas_from(sizes), true),
+            None if needs_sizes(&settings.layout) => (metas_from(&probe_sizes(&inner)), true),
+            None => (placeholder_metas(inner.pages.len()), false),
+        };
         let mut s = Self {
-            metas: probe_metas(&inner, needs_sizes(&settings.layout)),
+            metas,
+            sizes_known,
             inner,
             queue: JobQueue::new(workers),
             tx,
@@ -184,6 +204,13 @@ impl BookSession {
     /// 処理前の元バイト列（画像保存・共有用。劣化しない）。
     pub fn page_bytes(&self, page: usize) -> Result<Bytes> {
         self.inner.raw(page)
+    }
+
+    /// 取得済みのページ寸法 (幅, 高さ)。未取得（単ページ表示のみで開いている等）のときは None。
+    /// 呼び出し側が保存しておき、次回の `open_container_with_sizes` に渡す。
+    pub fn page_sizes(&self) -> Option<Vec<(u32, u32)>> {
+        self.sizes_known
+            .then(|| self.metas.iter().map(|m| (m.width, m.height)).collect())
     }
 
     pub fn events(&self) -> Receiver<CoreEvent> {
@@ -312,8 +339,9 @@ impl BookSession {
 
     pub fn set_layout(&mut self, layout: LayoutOptions) {
         let page = self.current_page();
-        if needs_sizes(&layout) && !needs_sizes(&self.settings.layout) {
-            self.metas = probe_metas(&self.inner, true);
+        if needs_sizes(&layout) && !self.sizes_known {
+            self.metas = metas_from(&probe_sizes(&self.inner));
+            self.sizes_known = true;
         }
         self.settings.layout = layout;
         self.relayout();
@@ -401,28 +429,51 @@ fn needs_sizes(l: &LayoutOptions) -> bool {
         && (l.wide_page_alone || l.mode == ViewMode::Auto)
 }
 
-/// 先頭だけ読んでヘッダから寸法を得る。判別できないページは縦長の仮寸法を使う。
-fn probe_metas(inner: &Inner, probe: bool) -> Vec<PageMeta> {
-    inner
-        .pages
+/// 寸法の取得に使うスレッド数。遅い入力（SAF の Binder 呼び出し、ネットワーク等）の待ちを重ねる。
+const PROBE_THREADS: usize = 8;
+
+/// 1 ページの寸法。先頭だけ読んでヘッダから得る。判別できなければ None。
+fn probe_one(inner: &Inner, id: pv_container::EntryId) -> Option<Size> {
+    let head = inner.container.read_prefix(id, PROBE_BYTES).ok()?;
+    inner.decoder.probe_size(&head).ok().or_else(|| {
+        // 先頭 64KB に SOF が収まらない JPEG 等は全体を読んで再試行
+        let all = inner.container.read(id).ok()?;
+        inner.decoder.probe_size(&all).ok()
+    })
+}
+
+/// 全ページの寸法を並列に調べる。判別できないページは縦長の仮寸法。
+fn probe_sizes(inner: &Inner) -> Vec<(u32, u32)> {
+    let n = inner.pages.len();
+    let next = AtomicUsize::new(0);
+    let found = Mutex::new(vec![PLACEHOLDER; n]);
+    std::thread::scope(|scope| {
+        for _ in 0..PROBE_THREADS.min(n) {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                if i >= n {
+                    break;
+                }
+                if let Some(size) = probe_one(inner, inner.pages[i]) {
+                    found.lock()[i] = (size.w, size.h);
+                }
+            });
+        }
+    });
+    found.into_inner()
+}
+
+fn metas_from(sizes: &[(u32, u32)]) -> Vec<PageMeta> {
+    sizes
         .iter()
-        .map(|&id| {
-            let size = probe
-                .then(|| {
-                    let head = inner.container.read_prefix(id, PROBE_BYTES).ok()?;
-                    inner.decoder.probe_size(&head).ok().or_else(|| {
-                        // 先頭 64KB に SOF が収まらない JPEG 等は全体を読んで再試行
-                        let all = inner.container.read(id).ok()?;
-                        inner.decoder.probe_size(&all).ok()
-                    })
-                })
-                .flatten();
-            let (width, height) = size.map_or(PLACEHOLDER, |s| (s.w, s.h));
-            PageMeta {
-                width,
-                height,
-                force_single: false,
-            }
+        .map(|&(width, height)| PageMeta {
+            width,
+            height,
+            force_single: false,
         })
         .collect()
+}
+
+fn placeholder_metas(n: usize) -> Vec<PageMeta> {
+    metas_from(&vec![PLACEHOLDER; n])
 }

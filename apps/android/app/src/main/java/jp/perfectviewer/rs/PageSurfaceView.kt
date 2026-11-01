@@ -81,6 +81,15 @@ class PageSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     fun currentZoom(): Float = zoom
 
+    /** ページ送りなどで、拡大・パンを等倍に戻す（古いページを拡大したまま次の描画を待たせない） */
+    fun resetZoom() {
+        if (zoom == 1f && panX == 0f && panY == 0f) return
+        zoom = 1f
+        panX = 0f
+        panY = 0f
+        draw()
+    }
+
     fun setZoom(z: Float, focusX: Float = width / 2f, focusY: Float = height / 2f) {
         val next = z.coerceIn(MIN_ZOOM, MAX_ZOOM)
         val k = next / zoom

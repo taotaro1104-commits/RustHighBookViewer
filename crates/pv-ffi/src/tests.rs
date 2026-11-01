@@ -262,3 +262,119 @@ fn tree_without_images_is_an_error_and_unreadable_pages_fail_cleanly() {
     let failed = (0..50).any(|_| matches!(r.next_event(100), Some(PvEvent::Failed { .. })));
     assert!(failed);
 }
+
+#[test]
+fn epub_pages_follow_the_spine_not_the_file_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("Comic.epub");
+    let mut z = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    let mut add = |name: &str, data: &[u8]| {
+        z.start_file(name, opts).unwrap();
+        z.write_all(data).unwrap();
+    };
+    add("mimetype", b"application/epub+zip");
+    add(
+        "META-INF/container.xml",
+        br#"<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#,
+    );
+    // ファイル名の順は 001, 002, 003。読む順（spine）は 003, 001, 002
+    add(
+        "OEBPS/content.opf",
+        br#"<package xmlns="http://www.idpf.org/2007/opf"><manifest>
+            <item id="p1" href="p1.xhtml" media-type="application/xhtml+xml"/>
+            <item id="p2" href="p2.xhtml" media-type="application/xhtml+xml"/>
+            <item id="p3" href="p3.xhtml" media-type="application/xhtml+xml"/>
+        </manifest><spine><itemref idref="p3"/><itemref idref="p1"/><itemref idref="p2"/></spine></package>"#,
+    );
+    for (i, v) in [(1u8, 30u8), (2, 90), (3, 150)] {
+        add(
+            &format!("OEBPS/p{i}.xhtml"),
+            format!(r#"<html><body><img src="img/{i:03}.png"/></body></html>"#).as_bytes(),
+        );
+        add(&format!("OEBPS/img/{i:03}.png"), &png(100, 150, v));
+    }
+    z.finish().unwrap();
+
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    let r = core.open_path(path.to_string_lossy().into_owned()).unwrap();
+    assert_eq!(r.page_count(), 3);
+    assert_eq!(r.page_name(0), "003.png");
+    assert_eq!(r.page_name(1), "001.png");
+    r.request_frame(0, 100, 150, 1.0);
+    // 1 ページ目は spine の先頭（003.png = 明度 150）
+    assert_eq!(first_frame(&r).rgba[0], 150);
+}
+
+#[test]
+fn reopening_a_book_keeps_the_same_layout_with_cached_page_sizes() {
+    let (_d, core, cbz) = setup(6);
+    let first = core.clone().open_path(cbz.clone()).unwrap();
+    let spreads = first.spread_count();
+    drop(first);
+    // 2 回目はページ寸法をキャッシュから読む。結果は同じでなければならない
+    let second = core.open_path(cbz).unwrap();
+    assert_eq!(second.spread_count(), spreads);
+}
+
+#[test]
+fn settings_are_saved_and_applied_to_newly_opened_books() {
+    let (d, core, cbz) = setup(4);
+    let mut s = core.settings();
+    assert_eq!(s.direction, PvDirection::RightToLeft);
+    s.direction = PvDirection::LeftToRight;
+    s.mode = PvViewMode::Single;
+    s.prefetch_forward = 99; // 範囲外は収める
+    core.set_settings(s).unwrap();
+    assert!(core.settings().prefetch_forward <= 12);
+
+    let r = core.clone().open_path(cbz).unwrap();
+    let l = r.layout();
+    assert_eq!(
+        (l.mode, l.direction),
+        (PvViewMode::Single, PvDirection::LeftToRight)
+    );
+    drop(r);
+
+    // 再起動（新しい PvCore）後も残っている
+    let core2 = PvCore::new(d.path().join("data").to_string_lossy().into_owned()).unwrap();
+    assert_eq!(core2.settings().direction, PvDirection::LeftToRight);
+}
+
+#[test]
+fn resetting_book_settings_lets_new_defaults_apply_again() {
+    let (_d, core, cbz) = setup(4);
+    let r = core.clone().open_path(cbz.clone()).unwrap();
+    r.set_layout(PvViewMode::Single, PvDirection::RightToLeft); // 本ごとの設定として保存される
+    drop(r);
+
+    let mut s = core.settings();
+    s.mode = PvViewMode::Double;
+    s.direction = PvDirection::LeftToRight;
+    core.set_settings(s).unwrap();
+    let r = core.clone().open_path(cbz.clone()).unwrap();
+    assert_eq!(
+        r.layout().mode,
+        PvViewMode::Single,
+        "本ごとの設定が優先される"
+    );
+    drop(r);
+
+    core.reset_book_settings().unwrap();
+    let r = core.open_path(cbz).unwrap();
+    assert_eq!(r.layout().mode, PvViewMode::Double);
+    assert_eq!(r.layout().direction, PvDirection::LeftToRight);
+}
+
+#[test]
+fn bookmarks_can_be_added_and_removed() {
+    let (_d, core, cbz) = setup(5);
+    let r = core.open_path(cbz).unwrap();
+    r.go_to_page(3);
+    let p = r.add_bookmark().unwrap();
+    assert_eq!(r.bookmarks().unwrap(), [p]);
+    r.remove_bookmark(p).unwrap();
+    assert!(r.bookmarks().unwrap().is_empty());
+    // 無いしおりの削除はエラーにしない
+    r.remove_bookmark(p).unwrap();
+}

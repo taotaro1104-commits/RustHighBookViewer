@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                    if (state.showSettings) SettingsScreen(state)
                 }
             }
         }
@@ -80,13 +81,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val up = keyCode == KeyEvent.KEYCODE_VOLUME_UP
-        if ((up || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) && state.volumeHandler?.invoke(up) == true) return true
+        if ((up || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) && !state.showSettings && state.volumeHandler?.invoke(up) == true) return true
         return super.onKeyDown(keyCode, event)
     }
 
     // 音量キーを押したときの音量 UI を出さないため、ハンドラが処理した場合は keyUp も飲み込む
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if ((keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) && state.volumeHandler != null) {
+        if ((keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) && !state.showSettings && state.volumeHandler != null && state.volumeKeys) {
             return true
         }
         return super.onKeyUp(keyCode, event)

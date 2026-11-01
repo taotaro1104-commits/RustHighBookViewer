@@ -14,12 +14,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -36,7 +40,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -49,6 +57,53 @@ import uniffi.pv_ffi.PvColor
 import uniffi.pv_ffi.PvReader
 
 private const val THUMB_PARALLELISM = 2
+
+/** ページ番号を入力して移動する。しおりの一覧（移動・外す）も出す。`onJump` の引数は 0 始まりのページ。 */
+@Composable
+fun PageJumpDialog(
+    total: Int,
+    current: Int,
+    bookmarks: List<Int>,
+    onJump: (Int) -> Unit,
+    onRemoveBookmark: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf((current + 1).toString()) }
+    val n = text.toIntOrNull()
+    val valid = n != null && n in 1..total
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("ページ指定") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.filter(Char::isDigit).take(6) },
+                    singleLine = true,
+                    label = { Text("1 〜 $total") },
+                    isError = text.isNotEmpty() && !valid,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
+                    keyboardActions = KeyboardActions(onGo = { if (valid) onJump(n!! - 1) }),
+                )
+                if (bookmarks.isNotEmpty()) {
+                    Text("しおり", style = MaterialTheme.typography.labelLarge)
+                    LazyColumn(Modifier.heightIn(max = 220.dp)) {
+                        items(bookmarks, key = { it }) { p ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(onClick = { onJump(p) }, modifier = Modifier.weight(1f)) {
+                                    Text("★ ${p + 1} ページ")
+                                }
+                                TextButton(onClick = { onRemoveBookmark(p) }) { Text("外す") }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(enabled = valid, onClick = { onJump(n!! - 1) }) { Text("移動") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+    )
+}
 
 /** 色調整。スライダーを離したとき（と切替ボタン）で [onChange] を呼び、閉じるまでは画面を再描画し続ける。 */
 @Composable

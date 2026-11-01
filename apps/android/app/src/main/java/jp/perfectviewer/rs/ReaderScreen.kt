@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.ceil
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -52,7 +54,14 @@ import uniffi.pv_ffi.PvFit
 import uniffi.pv_ffi.PvReader
 import uniffi.pv_ffi.PvViewMode
 
-private const val MAGNIFIER_QUALITY = 2.5f
+/** ルーペ中に使うフレームの精細度 */
+private const val MAGNIFIER_QUALITY = 2f
+
+/**
+ * コアに要求する描画倍率の上限。ズームのたびにページ全体をその倍率で作り直すので、
+ * 大きすぎると（8 倍で 8192px 級）描画が終わるまで画面が固まって見える。これを超える拡大は、表示側で引き伸ばす。
+ */
+private const val MAX_RENDER_SCALE = 2f
 
 /** 画面に出しているフレーム / 要求中のフレームを区別するキー（ページ・ビューポート・精細度） */
 private data class FrameKey(val spread: Int, val w: Int, val h: Int, val scale: Float)
@@ -68,6 +77,9 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
     var modeMenu by remember { mutableStateOf(false) }
     var showColor by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
+    var showJump by remember { mutableStateOf(false) }
+    /** しおりのあるページ（0 始まり） */
+    var bookmarks by remember { mutableStateOf(emptyList<Int>()) }
     var magnifier by remember { mutableStateOf(false) }
     var autoMenu by remember { mutableStateOf(false) }
     /** オートめくりの間隔（秒）。0 でオフ */
@@ -89,7 +101,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
         val (w, h) = viewport
         if (w <= 0 || h <= 0) return
         // ルーペ中は拡大して見られるよう、常に高精細なフレームを使う
-        val quality = if (magnifier) max(zoomLevel, MAGNIFIER_QUALITY) else zoomLevel
+        val quality = min(if (magnifier) max(zoomLevel, MAGNIFIER_QUALITY) else zoomLevel, MAX_RENDER_SCALE)
         val key = FrameKey(reader.cursor().toInt(), w, h, ceil(quality * 2f) / 2f)
         if (key == shown || key == pending) return
         pending = key
@@ -101,6 +113,41 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
         shown = null
         pending = null
         requestIfNeeded()
+    }
+
+    /** ページ移動の前に、拡大・パンを等倍に戻す。拡大したままだと、新しいページも高倍率で描くまで表示されない */
+    fun resetZoom() {
+        zoomLevel = 1f
+        surfaceHolder[0]?.resetZoom()
+    }
+
+    /** 指定ページ（0 始まり）へ移動する。スライダー・ページ一覧・ページ指定・しおりで共通 */
+    fun jumpTo(target: Int) {
+        val last = (reader.pageCount().toInt() - 1).coerceAtLeast(0)
+        resetZoom()
+        reader.goToPage(target.coerceIn(0, last).toUInt())
+        reader.saveProgress(false)
+        refreshPage()
+        requestIfNeeded()
+    }
+
+    fun toggleBookmark() {
+        scope.launch {
+            val msg = withContext(Dispatchers.IO) {
+                runCatching {
+                    val p = reader.currentPage()
+                    val text = if (reader.bookmarks().contains(p)) {
+                        reader.removeBookmark(p)
+                        "しおりを外しました: ${p + 1u} ページ"
+                    } else {
+                        "しおりを追加: ${reader.addBookmark() + 1u} ページ"
+                    }
+                    bookmarks = reader.bookmarks().map { it.toInt() }
+                    text
+                }.getOrElse { "しおりを操作できません: ${it.message}" }
+            }
+            state.toast(msg)
+        }
     }
 
     val saveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/*")) { uri ->
@@ -120,23 +167,24 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
             PvAction.ZOOM_IN -> surfaceHolder[0]?.let { it.setZoom(it.currentZoom() * 1.25f) }
             PvAction.ZOOM_OUT -> surfaceHolder[0]?.let { it.setZoom(it.currentZoom() / 1.25f) }
             PvAction.OPEN_THUMBNAILS -> uiVisible = !uiVisible // 既定の中央タップ: メニューの表示切替
-            PvAction.ADD_BOOKMARK -> state.toast(
-                runCatching { "しおりを追加: ${reader.addBookmark() + 1u}ページ" }.getOrElse { "しおりを追加できません: ${it.message}" },
-            )
+            PvAction.ADD_BOOKMARK -> toggleBookmark()
             PvAction.SAVE_PAGE -> saveLauncher.launch(reader.pageName(reader.currentPage()).ifEmpty { "page.png" })
             PvAction.TOGGLE_MAGNIFIER -> magnifier = !magnifier
             PvAction.OTHER -> state.toast("この操作は未対応です")
-            else -> if (reader.apply(action)) {
-                reader.saveProgress(false)
-                refreshPage()
-                requestIfNeeded()
+            else -> {
+                resetZoom()
+                if (reader.apply(action)) {
+                    reader.saveProgress(false)
+                    refreshPage()
+                    requestIfNeeded()
+                }
             }
         }
     }
 
     // ボリュームキーのページ送り
     DisposableEffect(reader) {
-        state.volumeHandler = { up -> reader.volumeAction(up)?.also { perform(it) } != null }
+        state.volumeHandler = { up -> state.volumeKeys && reader.volumeAction(up)?.also { perform(it) } != null }
         onDispose { state.volumeHandler = null }
     }
 
@@ -183,6 +231,11 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
 
     DisposableEffect(reader) { onDispose { runCatching { reader.saveProgress(true) } } }
 
+    // しおりの一覧を読み込む
+    LaunchedEffect(reader) {
+        bookmarks = withContext(Dispatchers.IO) { runCatching { reader.bookmarks().map { it.toInt() } }.getOrDefault(emptyList()) }
+    }
+
     // ルーペの ON/OFF に合わせて描画面と精細度を切り替える
     LaunchedEffect(magnifier) {
         surfaceHolder[0]?.magnifier = magnifier
@@ -190,9 +243,9 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
     }
 
     // オートめくり: 操作・メニュー表示・ダイアログ中は待ち直し、最後まで来たら止める
-    LaunchedEffect(autoSec, page, uiVisible, showColor, showGrid, magnifier) {
-        surfaceHolder[0]?.keepScreenOn = autoSec > 0
-        if (autoSec <= 0 || uiVisible || showColor || showGrid || magnifier) return@LaunchedEffect
+    LaunchedEffect(autoSec, page, uiVisible, showColor, showGrid, showJump, magnifier, state.keepScreenOn) {
+        surfaceHolder[0]?.keepScreenOn = autoSec > 0 || state.keepScreenOn
+        if (autoSec <= 0 || uiVisible || showColor || showGrid || showJump || magnifier) return@LaunchedEffect
         delay(autoSec * 1000L)
         if (reader.cursor() + 1u >= reader.spreadCount()) {
             autoSec = 0
@@ -238,12 +291,29 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                 currentPage = page,
                 onPick = { p ->
                     showGrid = false
-                    reader.goToPage(p.toUInt())
-                    reader.saveProgress(false)
-                    refreshPage()
-                    requestIfNeeded()
+                    jumpTo(p)
                 },
                 onDismiss = { showGrid = false },
+            )
+        }
+        if (showJump) {
+            PageJumpDialog(
+                total = reader.pageCount().toInt(),
+                current = page,
+                bookmarks = bookmarks,
+                onJump = { p ->
+                    showJump = false
+                    jumpTo(p)
+                },
+                onRemoveBookmark = { p ->
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            runCatching { reader.removeBookmark(p.toUInt()) }
+                            bookmarks = runCatching { reader.bookmarks().map { it.toInt() } }.getOrDefault(bookmarks)
+                        }
+                    }
+                },
+                onDismiss = { showJump = false },
             )
         }
 
@@ -311,6 +381,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                             requestIfNeeded()
                         }, label = { Text(label) })
                     }
+                    TextButton(onClick = { showJump = true }) { Text("ページ指定") }
                     TextButton(onClick = { showGrid = true }) { Text("一覧") }
                     TextButton(onClick = { showColor = true }) { Text("色調整") }
                     FilterChip(selected = magnifier, onClick = { magnifier = !magnifier; if (magnifier) { uiVisible = false; state.toast("ルーペ: 指でなぞって拡大。戻るキーで終了") } }, label = { Text("ルーペ") })
@@ -326,8 +397,9 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                             }
                         }
                     }
-                    TextButton(onClick = { perform(PvAction.ADD_BOOKMARK) }) { Text("★") }
+                    TextButton(onClick = { toggleBookmark() }) { Text(if (bookmarks.contains(page)) "★ しおり" else "☆ しおり") }
                     TextButton(onClick = { perform(PvAction.SAVE_PAGE) }) { Text("保存") }
+                    TextButton(onClick = { state.showSettings = true }) { Text("設定") }
                 }
             }
             // シークバー。右綴じでは右から左へ進むよう向きを反転する
@@ -339,12 +411,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                     Slider(
                         value = drag,
                         onValueChange = { drag = it },
-                        onValueChangeFinished = {
-                            reader.goToPage(drag.toInt().toUInt())
-                            reader.saveProgress(false)
-                            refreshPage()
-                            requestIfNeeded()
-                        },
+                        onValueChangeFinished = { jumpTo(drag.roundToInt()) },
                         valueRange = 0f..last.toFloat(),
                     )
                 }

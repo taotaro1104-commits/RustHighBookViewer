@@ -280,3 +280,95 @@ fn color_override_is_merged_per_book() {
     assert!(Settings::default().merged(&o).color.sepia);
     assert!(!Settings::default().color.sepia);
 }
+
+/// read_prefix の呼び出し回数を数えるコンテナ（寸法の取得が行われたかを確かめる）。
+struct Counting {
+    inner: pv_container::FolderContainer,
+    prefix_calls: std::sync::atomic::AtomicUsize,
+}
+
+impl pv_core::Container for Counting {
+    fn entries(&self) -> &[pv_container::EntryMeta] {
+        self.inner.entries()
+    }
+    fn read(&self, id: pv_container::EntryId) -> pv_container::Result<bytes::Bytes> {
+        self.inner.read(id)
+    }
+    fn open_reader(
+        &self,
+        id: pv_container::EntryId,
+    ) -> pv_container::Result<Box<dyn std::io::Read + Send>> {
+        self.inner.open_reader(id)
+    }
+    fn read_prefix(
+        &self,
+        id: pv_container::EntryId,
+        n: usize,
+    ) -> pv_container::Result<bytes::Bytes> {
+        self.prefix_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner.read_prefix(id, n)
+    }
+}
+
+fn counting(dir: &tempfile::TempDir) -> Arc<Counting> {
+    Arc::new(Counting {
+        inner: pv_container::FolderContainer::open(dir.path()).unwrap(),
+        prefix_calls: Default::default(),
+    })
+}
+
+use std::sync::Arc;
+
+#[test]
+fn page_sizes_are_probed_once_and_cached_sizes_skip_probing() {
+    use std::sync::atomic::Ordering::SeqCst;
+    // 3 枚目だけ横長 → 見開きの組み方が変わる
+    let dir = book(&[(100, 200), (100, 200), (300, 200), (100, 200), (100, 200)]);
+    let s = settings();
+
+    let c = counting(&dir);
+    let first = BookSession::open_container(c.clone(), 1, &s).unwrap();
+    assert_eq!(c.prefix_calls.load(SeqCst), 5, "全ページを 1 回ずつ調べる");
+    let sizes = first.page_sizes().expect("寸法を取得済み");
+    assert_eq!(
+        sizes,
+        [(100, 200), (100, 200), (300, 200), (100, 200), (100, 200)]
+    );
+
+    // 保存済みの寸法を渡せば、読み込みは行わず、同じ見開きになる
+    let c2 = counting(&dir);
+    let second = BookSession::open_container_with_sizes(c2.clone(), 1, &s, Some(&sizes)).unwrap();
+    assert_eq!(c2.prefix_calls.load(SeqCst), 0);
+    assert_eq!(second.spread_count(), first.spread_count());
+    for i in 0..first.spread_count() {
+        assert_eq!(second.spread(i), first.spread(i));
+    }
+
+    // ページ数の合わないキャッシュは使わない（読み直す）
+    let c3 = counting(&dir);
+    let _ = BookSession::open_container_with_sizes(c3.clone(), 1, &s, Some(&sizes[..2])).unwrap();
+    assert_eq!(c3.prefix_calls.load(SeqCst), 5);
+}
+
+#[test]
+fn single_page_mode_does_not_probe_until_layout_needs_sizes() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let dir = book(&[(100, 200), (300, 200), (100, 200)]);
+    let mut s = settings();
+    s.layout.mode = ViewMode::Single;
+    let c = counting(&dir);
+    let mut session = BookSession::open_container(c.clone(), 1, &s).unwrap();
+    assert_eq!(c.prefix_calls.load(SeqCst), 0);
+    assert!(session.page_sizes().is_none(), "未取得のときは保存しない");
+
+    let mut layout = session.settings().layout;
+    layout.mode = ViewMode::Double;
+    session.set_layout(layout);
+    assert_eq!(c.prefix_calls.load(SeqCst), 3);
+    assert!(session.page_sizes().is_some());
+    // 以後のレイアウト変更では、読み直さない
+    layout.direction = Direction::LeftToRight;
+    session.set_layout(layout);
+    assert_eq!(c.prefix_calls.load(SeqCst), 3);
+}

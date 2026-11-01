@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use pv_container::{open_source_with, ExtractGuard};
+use pv_container::{open_source_with, EntryKind, ExtractGuard};
 use pv_core::{
     make_thumbnail_from, BookOverride, BookSession, Container, DiskCache, FileSource, Settings,
     Source,
@@ -24,6 +24,8 @@ pub struct PvCore {
     library: Arc<Library>,
     settings: Mutex<Settings>,
     disk: DiskCache,
+    /// 設定ファイル（settings.toml）の場所
+    settings_path: PathBuf,
     /// 7z / RAR の展開先。起動ごとに空にする
     scratch: PathBuf,
     /// 7z / RAR の展開を途中で止める合図。新しく開くたびに下ろす
@@ -47,7 +49,8 @@ impl PvCore {
     pub fn new(data_dir: String) -> PvResult<Arc<Self>> {
         let dir = PathBuf::from(data_dir);
         std::fs::create_dir_all(&dir).map_err(PvError::new)?;
-        let settings = Settings::load(&dir.join("settings.toml")).unwrap_or_else(|e| {
+        let settings_path = dir.join("settings.toml");
+        let settings = Settings::load(&settings_path).unwrap_or_else(|e| {
             eprintln!("settings ignored: {e}");
             Settings::default()
         });
@@ -62,9 +65,30 @@ impl PvCore {
             library,
             settings: Mutex::new(settings),
             disk,
+            settings_path,
             scratch,
             cancel: Arc::default(),
         }))
+    }
+
+    /// 全体の既定設定。
+    pub fn settings(&self) -> PvSettings {
+        PvSettings::from(&*self.settings.lock())
+    }
+
+    /// 既定設定を保存し、これから開く本に使う。開いたことのある本は、本ごとの設定が優先される
+    /// （`reset_book_settings` で消せる）。範囲外の値は収める。
+    pub fn set_settings(&self, new: PvSettings) -> PvResult<()> {
+        let mut guard = self.settings.lock();
+        let updated = new.apply_to(&guard);
+        updated.save(&self.settings_path).map_err(PvError::new)?;
+        *guard = updated;
+        Ok(())
+    }
+
+    /// すべての本の「本ごとの設定」（表示モード・綴じ方向・フィット・色調整）を消す。
+    pub fn reset_book_settings(&self) -> PvResult<()> {
+        self.library.clear_book_settings().map_err(PvError::new)
     }
 
     /// 実行中の「開く」を中断する（7z / RAR の展開など時間のかかる処理が対象。別スレッドから呼ぶ）。
@@ -188,9 +212,15 @@ impl PvCore {
         title: String,
     ) -> PvResult<Arc<PvReader>> {
         let settings = self.settings.lock().clone();
-        let mut session =
-            BookSession::open_container(Arc::clone(&container), fnv(&key.head_hash), &settings)
-                .map_err(PvError::new)?;
+        // ページ（画像）の数。0 冊分のものを本棚に登録しないよう、先に確かめる
+        let page_count = container
+            .entries()
+            .iter()
+            .filter(|e| e.kind == EntryKind::Image)
+            .count();
+        if page_count == 0 {
+            return Err(PvError::new("画像が見つかりません"));
+        }
 
         let now = pv_library::now_ms();
         let book = self
@@ -201,7 +231,7 @@ impl PvCore {
                     size: key.size,
                     head_hash: key.head_hash.clone(),
                     title: title.clone(),
-                    page_count: session.page_count(),
+                    page_count,
                 },
                 now,
             )
@@ -209,6 +239,22 @@ impl PvCore {
         self.library
             .touch_opened(book.id, now)
             .map_err(PvError::new)?;
+
+        // 前回調べたページの寸法があれば使う（全ページの先頭を読む処理は、SAF や 7z では数秒かかる）
+        let cached = self
+            .library
+            .page_sizes(book.id, page_count)
+            .unwrap_or_else(|e| {
+                eprintln!("page sizes ignored: {e}");
+                None
+            });
+        let mut session = BookSession::open_container_with_sizes(
+            Arc::clone(&container),
+            fnv(&key.head_hash),
+            &settings,
+            cached.as_deref(),
+        )
+        .map_err(PvError::new)?;
 
         // 書庫ごとの設定上書きを復元してから、読書位置へ移動する
         if let Ok(Some(json)) = self.library.book_settings(book.id) {
@@ -224,6 +270,16 @@ impl PvCore {
         }
         if let Ok(Some(p)) = self.library.get_progress(book.id) {
             session.go_to_page(p.page_idx.min(session.page_count().saturating_sub(1)));
+        }
+        // 今回調べた寸法は、次回のために保存する
+        let mut sizes_saved = cached.is_some();
+        if !sizes_saved {
+            if let Some(sizes) = session.page_sizes() {
+                match self.library.save_page_sizes(book.id, &sizes) {
+                    Ok(()) => sizes_saved = true,
+                    Err(e) => eprintln!("page sizes not saved: {e}"),
+                }
+            }
         }
 
         // 本棚用サムネイル（SAF では後から開き直せない場合があるので、開いた時点で作る）
@@ -243,6 +299,7 @@ impl PvCore {
             Arc::clone(&self.library),
             book.id,
             title,
+            sizes_saved,
         )))
     }
 }

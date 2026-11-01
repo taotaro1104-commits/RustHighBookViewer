@@ -2,6 +2,7 @@ package jp.perfectviewer.rs
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import android.provider.DocumentsContract
 import uniffi.pv_ffi.PvException
 import uniffi.pv_ffi.PvTree
@@ -19,12 +20,14 @@ class SafTree(private val context: Context, private val treeUri: Uri) : PvTree {
 
     override fun entries(): List<PvTreeEntry> {
         val found = ArrayList<Doc>()
+        val t0 = System.nanoTime()
         try {
             walk(DocumentsContract.getTreeDocumentId(treeUri), "", 0, found)
         } catch (e: Exception) {
             throw PvException.Failed("フォルダを読めません: ${e.message}")
         }
         docs = found
+        Log.i("PV", "tree listed ${found.size} files in ${(System.nanoTime() - t0) / 1_000_000} ms")
         return found.map { PvTreeEntry(it.path, it.size.coerceAtLeast(0).toULong()) }
     }
 

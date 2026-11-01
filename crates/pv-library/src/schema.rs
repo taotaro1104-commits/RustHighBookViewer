@@ -49,6 +49,16 @@ CREATE TABLE book_settings (
 );
 ";
 
+/// ページの寸法のキャッシュ。見開き判定のために全ページの先頭を読む処理（遅い入力では数秒）を、
+/// 2 回目以降の読み込みで省く。`data` は (幅, 高さ) の u32 リトルエンディアンを並べたもの。
+pub const V2: &str = "
+CREATE TABLE page_sizes (
+    book_id    INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+    page_count INTEGER NOT NULL,
+    data       BLOB    NOT NULL
+);
+";
+
 pub fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(V1)])
+    Migrations::new(vec![M::up(V1), M::up(V2)])
 }

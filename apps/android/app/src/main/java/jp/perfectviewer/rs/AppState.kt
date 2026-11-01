@@ -3,6 +3,7 @@ package jp.perfectviewer.rs
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.widget.Toast
@@ -18,8 +19,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.pv_ffi.PvCore
 import uniffi.pv_ffi.PvReader
+import uniffi.pv_ffi.PvSort
 
 private const val DESTROY_DELAY_MS = 600L
+private const val KEY_VOLUME_KEYS = "volume_keys"
+private const val KEY_KEEP_SCREEN = "keep_screen"
+private const val KEY_SHELF_SORT = "shelf_sort"
 
 /** アプリ全体の状態。画面回転では Activity を作り直さない（Manifest の configChanges）ので単純な保持で足りる。 */
 class AppState private constructor(private val context: Context) {
@@ -39,6 +44,44 @@ class AppState private constructor(private val context: Context) {
 
     var busy by mutableStateOf(false)
         private set
+
+    /** 設定画面を表示中か */
+    var showSettings by mutableStateOf(false)
+
+    private val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+
+    /** 音量キーでページ送りするか */
+    var volumeKeys by mutableStateOf(prefs.getBoolean(KEY_VOLUME_KEYS, true))
+        private set
+
+    /** 閲覧中に画面を点灯したままにするか */
+    var keepScreenOn by mutableStateOf(prefs.getBoolean(KEY_KEEP_SCREEN, false))
+        private set
+
+    /** 本棚（すべて・お気に入り）の並び順 */
+    var shelfSort by mutableStateOf(
+        runCatching { PvSort.valueOf(prefs.getString(KEY_SHELF_SORT, null) ?: "") }.getOrDefault(PvSort.NAME),
+    )
+        private set
+
+    val versionName: String = runCatching {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    }.getOrNull() ?: ""
+
+    fun updateVolumeKeys(v: Boolean) {
+        volumeKeys = v
+        prefs.edit().putBoolean(KEY_VOLUME_KEYS, v).apply()
+    }
+
+    fun updateKeepScreenOn(v: Boolean) {
+        keepScreenOn = v
+        prefs.edit().putBoolean(KEY_KEEP_SCREEN, v).apply()
+    }
+
+    fun updateShelfSort(v: PvSort) {
+        shelfSort = v
+        prefs.edit().putString(KEY_SHELF_SORT, v.name).apply()
+    }
 
     /** 「開く」をユーザーが中断した。エラー表示を出さないための印 */
     @Volatile
@@ -65,6 +108,7 @@ class AppState private constructor(private val context: Context) {
         busy = true
         cancelRequested = false
         try {
+            val startedAt = System.nanoTime()
             val opened = withContext(Dispatchers.IO) {
                 if (DocumentsContract.isTreeUri(uri) && !isDocumentUri(uri)) {
                     // フォルダ（SAF ツリー）。列挙と読み出しは SafTree 経由
@@ -75,6 +119,7 @@ class AppState private constructor(private val context: Context) {
                     core.openFd(pfd.detachFd(), uri.toString(), displayName(uri))
                 }
             }
+            Log.i("PV", "opened in ${(System.nanoTime() - startedAt) / 1_000_000} ms: ${opened.title()} (${opened.pageCount()} pages)")
             val old = reader
             reader = opened
             old?.let { release(it) } // 閲覧中に別の本を開いた場合、旧 reader を残さない
