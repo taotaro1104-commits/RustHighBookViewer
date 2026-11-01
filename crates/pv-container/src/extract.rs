@@ -135,3 +135,75 @@ pub(crate) fn spill_to_file(src: &dyn Source, dir: &Path, name: &str) -> Result<
     }
     Ok(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn limits(entry: u64, total: u64, count: usize) -> Limits {
+        Limits {
+            max_entry_size: entry,
+            max_total_size: total,
+            max_ratio: 1000,
+            max_entries: count,
+        }
+    }
+
+    fn add(ex: &mut Extractor, name: &str, data: &[u8]) -> Result<()> {
+        ex.add(name, &mut &data[..])
+    }
+
+    #[test]
+    fn keeps_only_safe_images_in_natural_order() {
+        let scratch = tempfile::tempdir().unwrap();
+        let c = ExtractedContainer::build(scratch.path(), limits(100, 1000, 10), |ex| {
+            add(ex, "p10.png", b"ten")?;
+            add(ex, "p2.png", b"two")?;
+            add(ex, "notes.txt", b"skip")?;
+            add(ex, "../../evil.png", b"evil")?;
+            add(ex, "", b"empty name")
+        })
+        .unwrap();
+        let names: Vec<_> = c.entries().iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(names, ["evil.png", "p2.png", "p10.png"]);
+        assert_eq!(&c.read(EntryId(1)).unwrap()[..], b"two");
+        // 展開先は作業ディレクトリの中だけ（../ で外へ出ない）
+        assert_eq!(fs::read_dir(scratch.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn oversized_entry_is_rejected_and_cleaned_up() {
+        let scratch = tempfile::tempdir().unwrap();
+        let r = ExtractedContainer::build(scratch.path(), limits(4, 1000, 10), |ex| {
+            add(ex, "a.png", b"1234")?;
+            add(ex, "b.png", b"12345")
+        });
+        assert!(matches!(
+            r,
+            Err(ContainerError::LimitExceeded("entry size"))
+        ));
+        assert_eq!(fs::read_dir(scratch.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn total_and_count_limits_are_enforced() {
+        let scratch = tempfile::tempdir().unwrap();
+        let r = ExtractedContainer::build(scratch.path(), limits(10, 7, 10), |ex| {
+            add(ex, "a.png", b"1234")?;
+            add(ex, "b.png", b"1234")
+        });
+        assert!(matches!(
+            r,
+            Err(ContainerError::LimitExceeded("total size"))
+        ));
+        let r = ExtractedContainer::build(scratch.path(), limits(10, 100, 1), |ex| {
+            add(ex, "a.png", b"1")?;
+            add(ex, "b.png", b"2")
+        });
+        assert!(matches!(
+            r,
+            Err(ContainerError::LimitExceeded("entry count"))
+        ));
+        assert_eq!(fs::read_dir(scratch.path()).unwrap().count(), 0);
+    }
+}

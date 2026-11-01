@@ -42,9 +42,13 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import uniffi.pv_ffi.PvColor
 import uniffi.pv_ffi.PvReader
+
+private const val THUMB_PARALLELISM = 2
 
 /** 色調整。スライダーを離したとき（と切替ボタン）で [onChange] を呼び、閉じるまでは画面を再描画し続ける。 */
 @Composable
@@ -100,6 +104,9 @@ fun PageGridDialog(reader: PvReader, currentPage: Int, onPick: (Int) -> Unit, on
         override fun sizeOf(key: Int, value: Bitmap) = value.byteCount
     } }
     val total = reader.pageCount().toInt()
+    // 大きな画像を同時に何枚もデコードしてメモリが跳ねないよう、サムネイル生成は 2 並列まで。
+    // 待機中にスクロールで画面外へ出たものは、取り消されて生成されない。
+    val gate = remember { Semaphore(THUMB_PARALLELISM) }
     val state = rememberLazyGridState(initialFirstVisibleItemIndex = (currentPage - 3).coerceAtLeast(0))
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = Color(0xF2000000)) {
@@ -118,10 +125,15 @@ fun PageGridDialog(reader: PvReader, currentPage: Int, onPick: (Int) -> Unit, on
                     items((0 until total).toList(), key = { it }) { page ->
                         val bmp: Bitmap? by produceState(cache.get(page), page) {
                             if (value == null) {
-                                value = withContext(Dispatchers.IO) {
-                                    reader.pageThumbnail(page.toUInt(), 200u)
-                                        ?.let { rgbaToBitmap(it.width, it.height, it.rgba) }
-                                        ?.also { cache.put(page, it) }
+                                value = gate.withPermit {
+                                    withContext(Dispatchers.IO) {
+                                        // 本を閉じた直後に破棄済みになることがある。その場合は空のまま
+                                        runCatching {
+                                            reader.pageThumbnail(page.toUInt(), 200u)
+                                                ?.let { rgbaToBitmap(it.width, it.height, it.rgba) }
+                                                ?.also { cache.put(page, it) }
+                                        }.getOrNull()
+                                    }
                                 }
                             }
                         }

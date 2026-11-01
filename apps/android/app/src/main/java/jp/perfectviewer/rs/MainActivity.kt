@@ -26,7 +26,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        state = AppState(applicationContext)
+        state = AppState.get(applicationContext)
         handleIntent(intent)
 
         setContent {

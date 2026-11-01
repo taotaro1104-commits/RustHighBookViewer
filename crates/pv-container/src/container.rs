@@ -83,6 +83,9 @@ pub fn open_path(path: &Path) -> Result<Arc<dyn Container>> {
     open_source(Arc::new(FileSource::open(path)?))
 }
 
+/// 7z / RAR を作業領域へ展開するときの展開後サイズ合計の上限
+const EXTRACT_TOTAL_LIMIT: u64 = 4 << 30;
+
 /// 任意の Source（Android の fd 等）から、登録済みプロバイダで判定して開く。
 /// 7z / RAR の展開先は OS の一時ディレクトリ。Android など専用領域が要る環境は `open_source_in`。
 pub fn open_source(src: Arc<dyn Source>) -> Result<Arc<dyn Container>> {
@@ -91,8 +94,12 @@ pub fn open_source(src: Arc<dyn Source>) -> Result<Arc<dyn Container>> {
 
 /// `scratch` は 7z / RAR を展開する作業領域（コンテナを手放すと中身は消える）。
 pub fn open_source_in(src: Arc<dyn Source>, scratch: &Path) -> Result<Arc<dyn Container>> {
-    let limits = Limits::default();
     let zip = ZipProvider::default();
+    // 7z / RAR は端末の保存領域へ展開するため、ZIP（読み出し時に展開）より厳しい合計上限にする
+    let limits = Limits {
+        max_total_size: EXTRACT_TOTAL_LIMIT,
+        ..Limits::default()
+    };
     let sevenz = SevenZProvider {
         scratch: scratch.to_path_buf(),
         limits,

@@ -22,7 +22,7 @@ import uniffi.pv_ffi.PvReader
 private const val DESTROY_DELAY_MS = 600L
 
 /** アプリ全体の状態。画面回転では Activity を作り直さない（Manifest の configChanges）ので単純な保持で足りる。 */
-class AppState(private val context: Context) {
+class AppState private constructor(private val context: Context) {
     val core: PvCore = PvCore(context.filesDir.resolve("pv").absolutePath)
 
     /** 開いている本。null なら本棚を表示する */
@@ -97,6 +97,20 @@ class AppState(private val context: Context) {
 
     fun bumpShelf() {
         shelfVersion++
+    }
+
+    companion object {
+        @Volatile
+        private var instance: AppState? = null
+
+        /**
+         * プロセス内で 1 つだけ作る。Activity が再生成（ダークモード切替など）されても、
+         * 開いている本を保ち、PvCore の初期化（展開領域の掃除）を繰り返さない。
+         */
+        fun get(context: Context): AppState =
+            instance ?: synchronized(this) {
+                instance ?: AppState(context.applicationContext).also { instance = it }
+            }
     }
 }
 
