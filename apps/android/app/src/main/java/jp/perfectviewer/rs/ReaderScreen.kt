@@ -23,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -231,6 +232,19 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
 
     DisposableEffect(reader) { onDispose { runCatching { reader.saveProgress(true) } } }
 
+    // 「全画面」のフィットでは、ステータスバーとナビゲーションバーも隠す（端からスワイプすれば一時的に出る）
+    val window = (LocalContext.current as? android.app.Activity)?.window
+    val fullscreen = layout.fit == PvFit.FILL
+    DisposableEffect(window, fullscreen) {
+        val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+        if (fullscreen) {
+            controller?.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars()) }
+    }
+
     // しおりの一覧を読み込む
     LaunchedEffect(reader) {
         bookmarks = withContext(Dispatchers.IO) { runCatching { reader.bookmarks().map { it.toInt() } }.getOrDefault(emptyList()) }
@@ -379,12 +393,13 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                             redraw()
                         }
                     }) { Text(if (rtl) "右綴じ" else "左綴じ") }
-                    listOf(PvFit.WIDTH to "幅", PvFit.HEIGHT to "高さ", PvFit.PAGE to "全体").forEach { (fit, label) ->
+                    listOf(PvFit.WIDTH to "幅", PvFit.HEIGHT to "高さ", PvFit.PAGE to "全体", PvFit.FILL to "全画面").forEach { (fit, label) ->
                         FilterChip(selected = layout.fit == fit, onClick = {
                             perform(when (fit) {
                                 PvFit.WIDTH -> PvAction.FIT_WIDTH
                                 PvFit.HEIGHT -> PvAction.FIT_HEIGHT
                                 PvFit.PAGE -> PvAction.FIT_PAGE
+                                PvFit.FILL -> PvAction.FIT_FILL
                             })
                             shown = null
                             requestIfNeeded()

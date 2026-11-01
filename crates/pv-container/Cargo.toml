@@ -5,11 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ab_glyph = "0.2.32"
 bytes = "1.12.1"
 chardetng = "1.0.0"
+crc32fast = "1.5.3"
 encoding_rs = "0.8.44"
 fs4 = "1.1.0"
 natord = "1.0.9"
+png = "0.18.1"
 regex = "1.13.1"
 roxmltree = "0.21.2"
 sevenz-rust2 = "0.24.2"

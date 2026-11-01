@@ -7,6 +7,8 @@ pub enum FitMode {
     Width,
     Height,
     Page,
+    /// 画面いっぱい（余白が出ないように拡大し、はみ出す分はパンで見る）
+    Fill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,6 +34,7 @@ pub fn fit_scale(content: Vec2, viewport: Vec2, mode: FitMode) -> f32 {
         FitMode::Width => sx,
         FitMode::Height => sy,
         FitMode::Page => sx.min(sy),
+        FitMode::Fill => sx.max(sy),
     }
 }
 
@@ -75,6 +78,7 @@ mod tests {
         assert_eq!(fit_scale(c, v, FitMode::Width), 4.0);
         assert_eq!(fit_scale(c, v, FitMode::Height), 2.0);
         assert_eq!(fit_scale(c, v, FitMode::Page), 2.0);
+        assert_eq!(fit_scale(c, v, FitMode::Fill), 4.0);
         assert_eq!(fit_scale(Vec2::ZERO, v, FitMode::Page), 1.0);
     }
 

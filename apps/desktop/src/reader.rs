@@ -108,7 +108,11 @@ impl Reader {
         if self.session.apply(&action) {
             if matches!(
                 action,
-                Action::ShiftSpread | Action::FitWidth | Action::FitHeight | Action::FitPage
+                Action::ShiftSpread
+                    | Action::FitWidth
+                    | Action::FitHeight
+                    | Action::FitPage
+                    | Action::FitFill
             ) {
                 self.settings_changed(data);
             } else {
@@ -288,6 +292,7 @@ impl Reader {
                     (FitMode::Width, "幅", Action::FitWidth),
                     (FitMode::Height, "高さ", Action::FitHeight),
                     (FitMode::Page, "全体", Action::FitPage),
+                    (FitMode::Fill, "全画面", Action::FitFill),
                 ] {
                     if ui
                         .selectable_label(self.session.settings().fit == mode, label)

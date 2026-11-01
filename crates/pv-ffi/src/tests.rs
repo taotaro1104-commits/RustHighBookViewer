@@ -97,7 +97,9 @@ fn input_follows_binding_direction() {
     r.set_layout(PvViewMode::Double, PvDirection::LeftToRight);
     assert_eq!(r.tap_action(3), Some(PvAction::PrevSpread));
     assert_eq!(r.volume_action(false), Some(PvAction::NextSpread));
-    assert_eq!(r.tap_action(1), None);
+    // 中央の列は上・中・下のどこでもメニューの開閉
+    assert_eq!(r.tap_action(1), Some(PvAction::OpenThumbnails));
+    assert_eq!(r.tap_action(7), Some(PvAction::OpenThumbnails));
 }
 
 #[test]
@@ -502,5 +504,126 @@ fn scan_and_register_split_a_tree_into_books() {
             .unwrap()
             .len(),
         4
+    );
+}
+
+/// 計測用: `PV_BENCH_DIR` のフォルダを一括登録して、直列と並列の時間を比べる（通常の実行では動かさない）。
+#[test]
+#[ignore]
+fn bench_register_folder() {
+    let root = std::env::var("PV_BENCH_DIR").expect("PV_BENCH_DIR");
+    let run = |threads: usize| {
+        let dir = tempfile::tempdir().unwrap();
+        let core = PvCore::new(dir.path().to_string_lossy().into_owned()).unwrap();
+        let items = core.scan_folder(root.clone()).unwrap();
+        let t = std::time::Instant::now();
+        let queue = std::sync::Mutex::new(items.iter());
+        std::thread::scope(|s| {
+            for _ in 0..threads {
+                s.spawn(|| loop {
+                    let Some(i) = queue.lock().unwrap().next() else {
+                        break;
+                    };
+                    core.register_local(i.path.clone()).unwrap();
+                });
+            }
+        });
+        eprintln!(
+            "{} books, {threads} threads: {:?}",
+            items.len(),
+            t.elapsed()
+        );
+    };
+    run(1);
+    run(3);
+    run(6);
+}
+
+/// 画像の無い（文章だけの）EPUB。日本語フォントが無い環境では、その旨のエラーになる。
+#[test]
+fn text_epub_opens_and_renders_pages() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("小説.epub");
+    {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        let mut add = |name: &str, body: String| {
+            z.start_file(name, opts).unwrap();
+            z.write_all(body.as_bytes()).unwrap();
+        };
+        add(
+            "META-INF/container.xml",
+            r#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#.into(),
+        );
+        add(
+            "OEBPS/content.opf",
+            r#"<package><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>
+<item id="b" href="b.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="a"/><itemref idref="b"/></spine></package>"#
+                .into(),
+        );
+        for n in ["a", "b"] {
+            add(
+                &format!("OEBPS/{n}.xhtml"),
+                format!(
+                    "<html><body><h2>第{n}話</h2><p>{}</p></body></html>",
+                    "これは本文です。".repeat(300)
+                ),
+            );
+        }
+        z.finish().unwrap();
+    }
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    match core.open_path(path.to_string_lossy().into_owned()) {
+        Err(PvError::Failed { msg }) => {
+            // フォントの無い環境（CI など）
+            assert!(msg.contains("フォント"), "{msg}");
+        }
+        Ok(r) => {
+            assert!(r.page_count() >= 4, "{}", r.page_count());
+            assert_eq!(r.title(), "小説");
+            r.request_frame(0, 540, 810, 1.0);
+            let f = first_frame(&r);
+            assert!(f.width > 100 && f.height > 100);
+        }
+    }
+}
+
+#[test]
+fn groups_collect_books_and_survive_their_removal() {
+    let (d, core, cbz) = setup(2);
+    let cbz2 = d.path().join("Vol 2.cbz");
+    make_cbz(&cbz2, 3);
+    core.clone().open_path(cbz).unwrap();
+    core.clone()
+        .open_path(cbz2.to_string_lossy().into_owned())
+        .unwrap();
+    let ids: Vec<i64> = core
+        .list_books(String::new(), false, PvSort::Name)
+        .unwrap()
+        .iter()
+        .map(|b| b.id)
+        .collect();
+    assert_eq!(ids.len(), 2);
+
+    let g = core.create_group("  シリーズ ".into()).unwrap();
+    assert_eq!(g.name, "シリーズ");
+    assert_eq!(core.create_group("シリーズ".into()).unwrap().id, g.id);
+    core.add_to_group(g.id, ids.clone()).unwrap();
+    core.add_to_group(g.id, ids.clone()).unwrap(); // 重複は無視
+    assert_eq!(core.groups().unwrap()[0].count, 2);
+    assert_eq!(core.group_books(g.id).unwrap().len(), 2);
+
+    core.remove_from_group(g.id, vec![ids[0]]).unwrap();
+    assert_eq!(core.group_books(g.id).unwrap().len(), 1);
+    core.rename_group(g.id, "新しい名前".into()).unwrap();
+    assert_eq!(core.groups().unwrap()[0].name, "新しい名前");
+    core.delete_group(g.id).unwrap();
+    assert!(core.groups().unwrap().is_empty());
+    assert_eq!(
+        core.list_books(String::new(), false, PvSort::Name)
+            .unwrap()
+            .len(),
+        2
     );
 }

@@ -261,3 +261,29 @@ fn page_sizes_are_removed_with_the_book() {
     l.delete_book(b.id).unwrap();
     assert_eq!(l.page_sizes(b.id, 1).unwrap(), None);
 }
+
+#[test]
+fn shelves_have_counts_and_can_be_renamed_and_deleted() {
+    let l = lib();
+    let a = l.upsert_book(&nb("/a.cbz", "h1", "A", 1), 1).unwrap();
+    let b = l.upsert_book(&nb("/b.cbz", "h2", "B", 1), 1).unwrap();
+    let z = l.create_shelf("Zeta").unwrap();
+    let s = l.create_shelf("alpha").unwrap();
+    l.add_to_shelf(s.id, a.id).unwrap();
+    l.add_to_shelf(s.id, b.id).unwrap();
+    let got: Vec<_> = l
+        .shelves_with_counts()
+        .unwrap()
+        .into_iter()
+        .map(|(sh, n)| (sh.name, n))
+        .collect();
+    assert_eq!(got, [("alpha".to_owned(), 2), ("Zeta".to_owned(), 0)]);
+
+    l.rename_shelf(s.id, "シリーズ").unwrap();
+    assert!(l.rename_shelf(s.id, " ").is_err());
+    assert!(l.rename_shelf(s.id, "Zeta").is_err(), "同名は不可");
+    // 棚を消しても本は残る
+    l.delete_shelf(s.id).unwrap();
+    assert_eq!(l.get_book(a.id).unwrap().title, "A");
+    assert_eq!(l.shelves().unwrap(), vec![z]);
+}

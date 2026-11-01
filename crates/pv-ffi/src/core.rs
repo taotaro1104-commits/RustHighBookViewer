@@ -151,6 +151,8 @@ impl PvCore {
     /// フォルダ以下を探して、本の単位に分けて返す。
     /// 各フォルダの直下の画像をまとめて 1 冊、EPUB などの書庫ファイルは 1 つにつき 1 冊。サブフォルダも同様。
     pub fn scan_folder(&self, path: String) -> PvResult<Vec<PvScanItem>> {
+        // 以降の一括登録のために、前回のキャンセルを解除しておく
+        self.cancel.store(false, Ordering::Relaxed);
         let items = scan_books(Path::new(&path), MAX_SCAN_BOOKS).map_err(PvError::open)?;
         Ok(items
             .into_iter()
@@ -163,8 +165,8 @@ impl PvCore {
     }
 
     /// 開かずに本棚へ登録する（ページ数とサムネイルまで）。フォルダ一括読み込み用。
+    /// 複数のスレッドから同時に呼べる。キャンセルの解除はしない（`scan_folder` が行う）。
     pub fn register_local(&self, path: String) -> PvResult<PvBook> {
-        self.cancel.store(false, Ordering::Relaxed);
         let p = self.prepare_local(&path)?;
         let (book, _) = self.register_container(p.container.as_ref(), &p.key, p.uri, p.title)?;
         Ok(PvBook::from(&book))
@@ -224,6 +226,69 @@ impl PvCore {
         self.library
             .set_favorite(book_id, favorite)
             .map_err(PvError::new)
+    }
+
+    /// グループの一覧（名前順）。
+    pub fn groups(&self) -> PvResult<Vec<PvGroup>> {
+        let rows = self.library.shelves_with_counts().map_err(PvError::new)?;
+        Ok(rows
+            .into_iter()
+            .map(|(s, n)| PvGroup {
+                id: s.id,
+                name: s.name,
+                count: n as u32,
+            })
+            .collect())
+    }
+
+    /// グループを作る。同じ名前のグループがあれば、それを返す。
+    pub fn create_group(&self, name: String) -> PvResult<PvGroup> {
+        let s = self
+            .library
+            .create_shelf(name.trim())
+            .map_err(PvError::new)?;
+        let count = self.library.shelf_books(s.id).map_err(PvError::new)?.len() as u32;
+        Ok(PvGroup {
+            id: s.id,
+            name: s.name,
+            count,
+        })
+    }
+
+    pub fn rename_group(&self, group_id: i64, name: String) -> PvResult<()> {
+        self.library
+            .rename_shelf(group_id, name.trim())
+            .map_err(PvError::new)
+    }
+
+    /// グループを消す（中の本はライブラリに残る）。
+    pub fn delete_group(&self, group_id: i64) -> PvResult<()> {
+        self.library.delete_shelf(group_id).map_err(PvError::new)
+    }
+
+    /// 本をグループに入れる（渡した順に末尾へ足す。すでに入っている本は無視）。
+    pub fn add_to_group(&self, group_id: i64, book_ids: Vec<i64>) -> PvResult<()> {
+        for id in book_ids {
+            self.library
+                .add_to_shelf(group_id, id)
+                .map_err(PvError::new)?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_from_group(&self, group_id: i64, book_ids: Vec<i64>) -> PvResult<()> {
+        for id in book_ids {
+            self.library
+                .remove_from_shelf(group_id, id)
+                .map_err(PvError::new)?;
+        }
+        Ok(())
+    }
+
+    /// グループの中の本（入れた順）。
+    pub fn group_books(&self, group_id: i64) -> PvResult<Vec<PvBook>> {
+        let books = self.library.shelf_books(group_id).map_err(PvError::new)?;
+        Ok(books.iter().map(PvBook::from).collect())
     }
 
     pub fn delete_book(&self, book_id: i64) -> PvResult<()> {
@@ -373,8 +438,8 @@ impl PvCore {
         .map_err(PvError::open)?;
 
         // 書庫ごとの設定上書きを復元してから、読書位置へ移動する
-        if let Ok(Some(json)) = self.library.book_settings(book.id) {
-            match serde_json::from_str::<BookOverride>(&json) {
+        match self.library.book_settings(book.id) {
+            Ok(Some(json)) => match serde_json::from_str::<BookOverride>(&json) {
                 Ok(o) => {
                     let merged = settings.merged(&o);
                     session.set_layout(merged.layout);
@@ -382,7 +447,14 @@ impl PvCore {
                     session.set_color(merged.color);
                 }
                 Err(e) => eprintln!("book settings ignored: {e}"),
+            },
+            // 文章の本は、何も設定していなければ単ページで開く
+            _ if container.is_text() => {
+                let mut layout = settings.layout;
+                layout.mode = pv_core::ViewMode::Single;
+                session.set_layout(layout);
             }
+            _ => {}
         }
         if let Ok(Some(p)) = self.library.get_progress(book.id) {
             session.go_to_page(p.page_idx.min(session.page_count().saturating_sub(1)));

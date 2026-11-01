@@ -296,7 +296,7 @@ class PageSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
     }
 
     companion object {
-        private const val LOUPE_HOLD_MS = 180L
+        private const val LOUPE_HOLD_MS = 320L
         private const val FLICK_MIN_VELOCITY = 600f
         private const val FLICK_MIN_DISTANCE = 120f
         const val MIN_ZOOM = 1f

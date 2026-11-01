@@ -10,6 +10,7 @@ use crate::epub::EpubContainer;
 use crate::error::{ContainerError, Result};
 use crate::path::{decode_name, normalize_path};
 use crate::source::{MemorySource, Source, SourceReader};
+use crate::text_epub::TextEpubContainer;
 
 /// ローカルファイルヘッダ / 空アーカイブの終端レコード
 const MAGICS: [&[u8; 4]; 2] = [b"PK\x03\x04", b"PK\x05\x06"];
@@ -33,7 +34,11 @@ impl ContainerProvider for ZipProvider {
         // EPUB（コミック・写真集）なら、spine の順に画像を並べる。読めなければ通常の ZIP として扱う
         Ok(match EpubContainer::from_zip(zip) {
             Ok(epub) => Arc::new(epub),
-            Err(zip) => Arc::new(zip),
+            // 画像の無い EPUB は、文章の本として読む（フォントが無ければエラー）
+            Err(zip) => match TextEpubContainer::try_open(zip)? {
+                Ok(text) => Arc::new(text),
+                Err(zip) => Arc::new(zip),
+            },
         })
     }
 }

@@ -21,6 +21,10 @@ pub trait Container: Send + Sync {
     /// 巨大エントリ用
     fn open_reader(&self, id: EntryId) -> Result<Box<dyn Read + Send>>;
     /// 先頭 `n` バイトだけ読む（画像ヘッダからの寸法取得用）。
+    /// 文章を描いたページでできた本か（見開きより単ページで読むのが向く）。
+    fn is_text(&self) -> bool {
+        false
+    }
     fn read_prefix(&self, id: EntryId, n: usize) -> Result<Bytes> {
         let mut buf = Vec::new();
         self.open_reader(id)?.take(n as u64).read_to_end(&mut buf)?;

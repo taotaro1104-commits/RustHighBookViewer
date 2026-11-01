@@ -6,11 +6,14 @@ mod epub;
 mod error;
 mod extract;
 mod folder;
+mod font;
 mod path;
 mod rar;
 mod scan;
 mod sevenz;
 mod source;
+mod text_epub;
+mod text_layout;
 mod zip_container;
 
 pub use container::{
@@ -27,4 +30,5 @@ pub use rar::RarProvider;
 pub use scan::{scan_books, ScanItem, ScanKind};
 pub use sevenz::SevenZProvider;
 pub use source::{FileSource, MemorySource, Source, SourceReader};
+pub use text_epub::TextEpubContainer;
 pub use zip_container::{open_nested, ZipContainer, ZipProvider};

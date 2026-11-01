@@ -336,6 +336,47 @@ impl Library {
         Ok(rows)
     }
 
+    /// 棚と、その中の本の数。
+    pub fn shelves_with_counts(&self) -> Result<Vec<(Shelf, usize)>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.name, COUNT(i.book_id) FROM shelves s
+             LEFT JOIN shelf_items i ON i.shelf_id = s.id GROUP BY s.id ORDER BY s.name COLLATE NOCASE",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    Shelf {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                    },
+                    r.get::<_, i64>(2)? as usize,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// 棚を消す（中の本は消えない）。
+    pub fn delete_shelf(&self, shelf: i64) -> Result<()> {
+        self.conn
+            .lock()
+            .execute("DELETE FROM shelves WHERE id=?1", [shelf])?;
+        Ok(())
+    }
+
+    /// 棚の名前を変える。同じ名前の棚が既にあるときはエラー。
+    pub fn rename_shelf(&self, shelf: i64, name: &str) -> Result<()> {
+        if name.trim().is_empty() {
+            return Err(LibraryError::Invalid("shelf name is empty"));
+        }
+        self.conn.lock().execute(
+            "UPDATE shelves SET name=?2 WHERE id=?1",
+            params![shelf, name],
+        )?;
+        Ok(())
+    }
+
     pub fn add_to_shelf(&self, shelf: i64, book: BookId) -> Result<()> {
         self.conn.lock().execute(
             "INSERT OR IGNORE INTO shelf_items (shelf_id, book_id, position)

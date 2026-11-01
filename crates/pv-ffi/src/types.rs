@@ -38,6 +38,9 @@ pub fn describe_error(e: &(dyn std::error::Error + 'static)) -> String {
     if let Some(c) = e.downcast_ref::<ContainerError>() {
         return match c {
             ContainerError::Io(inner) => describe_error(inner),
+            ContainerError::NoFont => {
+                "文章の EPUB を表示するための日本語フォントが端末に見つかりません".into()
+            }
             ContainerError::Unsupported => {
                 "対応していない形式です（ZIP/CBZ・7z・RAR・EPUB・フォルダに対応）".into()
             }
@@ -94,6 +97,7 @@ pub enum PvFit {
     Width,
     Height,
     Page,
+    Fill,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -124,6 +128,7 @@ pub enum PvAction {
     FitWidth,
     FitHeight,
     FitPage,
+    FitFill,
     ZoomIn,
     ZoomOut,
     AddBookmark,
@@ -142,6 +147,14 @@ pub struct PvBook {
     pub status: PvStatus,
     pub favorite: bool,
     pub last_opened_at: Option<i64>,
+}
+
+/// 本をまとめたグループ（シリーズ・フォルダ単位など）
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PvGroup {
+    pub id: i64,
+    pub name: String,
+    pub count: u32,
 }
 
 /// フォルダ一括読み込みで見つかった 1 冊
@@ -325,6 +338,7 @@ impl From<FitMode> for PvFit {
             FitMode::Width => Self::Width,
             FitMode::Height => Self::Height,
             FitMode::Page => Self::Page,
+            FitMode::Fill => Self::Fill,
         }
     }
 }
@@ -335,6 +349,7 @@ impl From<PvFit> for FitMode {
             PvFit::Width => Self::Width,
             PvFit::Height => Self::Height,
             PvFit::Page => Self::Page,
+            PvFit::Fill => Self::Fill,
         }
     }
 }
@@ -376,6 +391,7 @@ impl From<&Action> for PvAction {
             Action::FitWidth => Self::FitWidth,
             Action::FitHeight => Self::FitHeight,
             Action::FitPage => Self::FitPage,
+            Action::FitFill => Self::FitFill,
             Action::ZoomIn => Self::ZoomIn,
             Action::ZoomOut => Self::ZoomOut,
             Action::AddBookmark => Self::AddBookmark,
@@ -401,6 +417,7 @@ impl PvAction {
             Self::FitWidth => Action::FitWidth,
             Self::FitHeight => Action::FitHeight,
             Self::FitPage => Action::FitPage,
+            Self::FitFill => Action::FitFill,
             _ => return None,
         })
     }

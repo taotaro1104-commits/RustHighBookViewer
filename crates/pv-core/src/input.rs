@@ -29,6 +29,7 @@ pub enum Action {
     FitWidth,
     FitHeight,
     FitPage,
+    FitFill,
     OpenThumbnails,
     OpenNextVolume,
     AddBookmark,
@@ -124,10 +125,13 @@ impl InputMap {
                 action: right.clone(),
             });
         }
-        b.push(Binding {
-            key: InputKey::TapZone(4),
-            action: OpenThumbnails,
-        });
+        // 中央の列（上・中・下）はどこを押してもメニューの開閉
+        for z in [1u8, 4, 7] {
+            b.push(Binding {
+                key: InputKey::TapZone(z),
+                action: OpenThumbnails,
+            });
+        }
         let (arrow_l, arrow_r) = (key("ArrowLeft"), key("ArrowRight"));
         b.push(Binding {
             key: arrow_l,
@@ -199,6 +203,13 @@ mod tests {
     #[test]
     fn rtl_left_tap_goes_forward_and_ltr_is_mirrored() {
         let rtl = InputMap::standard(Direction::RightToLeft);
+        for z in [1u8, 4, 7] {
+            assert_eq!(
+                rtl.lookup(&InputKey::TapZone(z)),
+                Some(&Action::OpenThumbnails),
+                "zone {z}"
+            );
+        }
         assert_eq!(rtl.lookup(&InputKey::TapZone(3)), Some(&Action::NextSpread));
         assert_eq!(rtl.lookup(&InputKey::TapZone(5)), Some(&Action::PrevSpread));
         let ltr = InputMap::standard(Direction::LeftToRight);
@@ -217,7 +228,10 @@ mod tests {
 
     #[test]
     fn unbound_input_is_none() {
-        assert_eq!(InputMap::default().lookup(&InputKey::TapZone(1)), None);
+        assert_eq!(
+            InputMap::default().lookup(&InputKey::Key("F13".to_owned())),
+            None
+        );
     }
 
     #[test]

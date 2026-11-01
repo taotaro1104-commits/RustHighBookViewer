@@ -14,6 +14,8 @@ pub enum ContainerError {
     Unsupported,
     #[error("entry {0} not found")]
     NotFound(u32),
+    #[error("no usable font for text epub")]
+    NoFont,
     #[error("limit exceeded: {0}")]
     LimitExceeded(&'static str),
 }

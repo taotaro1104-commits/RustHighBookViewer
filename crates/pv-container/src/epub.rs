@@ -16,11 +16,11 @@ use crate::entry::{kind_from_path, EntryId, EntryKind, EntryMeta};
 use crate::error::Result;
 use crate::zip_container::ZipContainer;
 
-const CONTAINER_XML: &str = "META-INF/container.xml";
+pub(crate) const CONTAINER_XML: &str = "META-INF/container.xml";
 /// OPF・XHTML を読む上限（壊れた/悪意あるファイルでメモリを使い切らない）
-const MAX_XML: usize = 4 << 20;
+pub(crate) const MAX_XML: usize = 4 << 20;
 /// spine の項目数の上限
-const MAX_SPINE: usize = 100_000;
+pub(crate) const MAX_SPINE: usize = 100_000;
 
 pub struct EpubContainer {
     zip: ZipContainer,
@@ -83,13 +83,13 @@ impl Container for EpubContainer {
 }
 
 /// ZIP 内のパス → エントリ。大文字小文字の違いは、完全一致が無いときだけ許す。
-struct PathIndex {
+pub(crate) struct PathIndex {
     exact: HashMap<String, EntryId>,
     lower: HashMap<String, EntryId>,
 }
 
 impl PathIndex {
-    fn new(entries: &[EntryMeta]) -> Self {
+    pub(crate) fn new(entries: &[EntryMeta]) -> Self {
         let mut exact = HashMap::with_capacity(entries.len());
         let mut lower = HashMap::with_capacity(entries.len());
         for e in entries {
@@ -99,7 +99,7 @@ impl PathIndex {
         Self { exact, lower }
     }
 
-    fn get(&self, path: &str) -> Option<EntryId> {
+    pub(crate) fn get(&self, path: &str) -> Option<EntryId> {
         self.exact
             .get(path)
             .or_else(|| self.lower.get(&path.to_lowercase()))
@@ -107,19 +107,19 @@ impl PathIndex {
     }
 }
 
-struct Item {
-    href: String,
-    media_type: String,
-    properties: String,
+pub(crate) struct Item {
+    pub(crate) href: String,
+    pub(crate) media_type: String,
+    pub(crate) properties: String,
 }
 
-fn read_text(zip: &ZipContainer, id: EntryId) -> Option<String> {
+pub(crate) fn read_text(zip: &ZipContainer, id: EntryId) -> Option<String> {
     let bytes = zip.read_prefix(id, MAX_XML).ok()?;
     let text = String::from_utf8_lossy(&bytes);
     Some(text.trim_start_matches('\u{feff}').to_owned())
 }
 
-fn parse_xml(text: &str) -> Option<roxmltree::Document<'_>> {
+pub(crate) fn parse_xml(text: &str) -> Option<roxmltree::Document<'_>> {
     let opts = roxmltree::ParsingOptions {
         allow_dtd: true, // XHTML 由来の DOCTYPE を持つ OPF がある
         ..Default::default()
@@ -127,7 +127,7 @@ fn parse_xml(text: &str) -> Option<roxmltree::Document<'_>> {
     roxmltree::Document::parse_with_options(text, opts).ok()
 }
 
-fn rootfile_path(container_xml: &str) -> Option<String> {
+pub(crate) fn rootfile_path(container_xml: &str) -> Option<String> {
     let doc = parse_xml(container_xml)?;
     let node = doc
         .descendants()
@@ -135,7 +135,7 @@ fn rootfile_path(container_xml: &str) -> Option<String> {
     node.attribute("full-path").map(str::to_owned)
 }
 
-fn dir_of(path: &str) -> &str {
+pub(crate) fn dir_of(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(d, _)| d)
 }
 
@@ -168,7 +168,7 @@ fn hex(c: u8) -> Option<u8> {
 
 /// `base_dir`（ZIP 内のディレクトリ）から見た相対参照を、ZIP 内のパスにする。
 /// 外部 URL・data URI・ZIP の外へ出る参照は None。
-fn resolve(base_dir: &str, href: &str) -> Option<String> {
+pub(crate) fn resolve(base_dir: &str, href: &str) -> Option<String> {
     let href = href.split(['#', '?']).next()?.trim();
     if href.is_empty() || href.contains(':') {
         return None; // http: / data: / mailto: など
@@ -204,7 +204,7 @@ fn image_refs(xhtml: &str) -> Vec<String> {
         .collect()
 }
 
-fn is_markup(item: &Item, path: &str) -> bool {
+pub(crate) fn is_markup(item: &Item, path: &str) -> bool {
     let mt = item.media_type.to_ascii_lowercase();
     let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
     mt.contains("html")

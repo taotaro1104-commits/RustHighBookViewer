@@ -200,6 +200,7 @@ impl PvReader {
                     | PvAction::FitWidth
                     | PvAction::FitHeight
                     | PvAction::FitPage
+                    | PvAction::FitFill
             )
         {
             self.after_settings_change(s);

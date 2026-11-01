@@ -84,6 +84,7 @@ fn fit_id(f: FitMode) -> u8 {
         FitMode::Width => 0,
         FitMode::Height => 1,
         FitMode::Page => 2,
+        FitMode::Fill => 3,
     }
 }
 
@@ -393,6 +394,7 @@ impl BookSession {
             Action::FitWidth => self.set_fit(FitMode::Width),
             Action::FitHeight => self.set_fit(FitMode::Height),
             Action::FitPage => self.set_fit(FitMode::Page),
+            Action::FitFill => self.set_fit(FitMode::Fill),
             _ => return false,
         }
         true

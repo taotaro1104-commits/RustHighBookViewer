@@ -9,29 +9,40 @@ import android.util.Log
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.nio.ByteBuffer
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.pv_ffi.PvBook
 import uniffi.pv_ffi.PvCore
+import uniffi.pv_ffi.PvGroup
 import uniffi.pv_ffi.PvException
 import uniffi.pv_ffi.PvReader
 import uniffi.pv_ffi.PvSort
 
 private const val DESTROY_DELAY_MS = 600L
 private const val FILE_PREFIX = "file://"
+private const val REGISTER_PARALLELISM = 3
 private const val KEY_BROWSE_DIR = "browse_dir"
 private const val KEY_VOLUME_KEYS = "volume_keys"
 private const val KEY_KEEP_SCREEN = "keep_screen"
 private const val KEY_SHELF_SORT = "shelf_sort"
+private const val KEY_SHELF_LIST = "shelf_list"
 
 /** アプリ全体の状態。画面回転では Activity を作り直さない（Manifest の configChanges）ので単純な保持で足りる。 */
 class AppState private constructor(private val context: Context) {
@@ -85,6 +96,30 @@ class AppState private constructor(private val context: Context) {
         private set
 
     /** 本棚（すべて・お気に入り）の並び順 */
+    /** 本棚で見ていたタブ。本を開いて閉じても、開く前のタブへ戻れるよう、画面の外で持つ */
+    var shelfTab by mutableStateOf(ShelfTab.RECENT)
+
+    var shelfQuery by mutableStateOf("")
+
+    /** 開いているグループ。null ならグループの外 */
+    var shelfGroup: PvGroup? by mutableStateOf(null)
+
+    /** 本棚のスクロール位置 */
+    val shelfGrid = LazyGridState()
+
+    /** 次に一覧が出たとき、先頭へ戻すか（タブやグループを切り替えたとき） */
+    var shelfScrollToTop by mutableStateOf(false)
+
+    /** 本の一覧を、サムネイルではなく「ファイル・フォルダ名の一覧」で見せるか */
+    var shelfAsList by mutableStateOf(prefs.getBoolean(KEY_SHELF_LIST, false))
+        private set
+
+    fun updateShelfAsList(v: Boolean) {
+        shelfAsList = v
+        prefs.edit().putBoolean(KEY_SHELF_LIST, v).apply()
+        shelfScrollToTop = true
+    }
+
     var shelfSort by mutableStateOf(
         runCatching { PvSort.valueOf(prefs.getString(KEY_SHELF_SORT, null) ?: "") }.getOrDefault(PvSort.NAME),
     )
@@ -110,8 +145,7 @@ class AppState private constructor(private val context: Context) {
     }
 
     /** 「開く」をユーザーが中断した。エラー表示を出さないための印 */
-    @Volatile
-    private var cancelRequested = false
+    @Volatile private var cancelRequested = false
 
     /** 7z / RAR の展開など、時間のかかる「開く」を中断する。 */
     fun cancelOpen() {
@@ -175,7 +209,7 @@ class AppState private constructor(private val context: Context) {
             when (items.size) {
                 0 -> toast("画像も書庫（EPUB・ZIP・7z・RAR）も見つかりませんでした")
                 1 -> { busy = false; openLocalPath(items[0].path) }
-                else -> registerAll(items.map { it.path })
+                else -> registerAll(items.map { it.path }, java.io.File(path).name)
             }
         } catch (e: CancellationException) {
             throw e
@@ -187,20 +221,43 @@ class AppState private constructor(private val context: Context) {
         }
     }
 
-    private suspend fun registerAll(paths: List<String>) {
-        var added = 0
-        var failed = 0
-        for ((i, p) in paths.withIndex()) {
-            if (cancelRequested) break
-            importProgress = i to paths.size
-            val ok = withContext(Dispatchers.IO) { runCatching { core.registerLocal(p) }.isSuccess }
-            if (ok) added++ else failed++
-            if (i % 5 == 4) shelfVersion++ // 途中経過も本棚に出す
+    private suspend fun registerAll(paths: List<String>, groupName: String) {
+        val registered = arrayOfNulls<PvBook>(paths.size) // 読んだ順ではなく、見つけた順に並べるため添字で持つ
+        val failed = AtomicInteger()
+        val finished = AtomicInteger()
+        importProgress = 0 to paths.size
+        // 画像のデコードや 7z/RAR の展開は重いので、数冊ずつ並べて登録する（多すぎると作業領域と電池を食う）
+        val gate = Semaphore(REGISTER_PARALLELISM)
+        coroutineScope {
+            paths.mapIndexed { i, p ->
+                async(Dispatchers.IO) {
+                    gate.withPermit {
+                        if (cancelRequested) return@withPermit
+                        val t0 = System.nanoTime()
+                        val book = runCatching { core.registerLocal(p) }.getOrNull()
+                        Log.i("PV", "registered in ${(System.nanoTime() - t0) / 1_000_000} ms: $p")
+                        if (book != null) registered[i] = book else failed.incrementAndGet()
+                        val n = finished.incrementAndGet()
+                        importProgress = n to paths.size
+                        if (n % 5 == 0) shelfVersion++ // 途中経過も本棚に出す
+                    }
+                }
+            }.awaitAll()
+        }
+        val books = registered.filterNotNull()
+        // 複数の本が見つかったときは、フォルダ名のグループにまとめる（見つけた順）
+        var grouped = ""
+        if (books.size > 1 && groupName.isNotBlank()) {
+            runCatching {
+                val g = core.createGroup(groupName)
+                core.addToGroup(g.id, books.map { it.id })
+                grouped = "（グループ「${g.name}」）"
+            }
         }
         close() // 閲覧中なら閉じて本棚へ
         shelfVersion++
-        val tail = if (failed > 0) "（読めなかった $failed 件は除く）" else ""
-        toast(if (cancelRequested) "$added 冊を追加して中止しました" else "$added 冊を本棚に追加しました$tail")
+        val tail = if (failed.get() > 0) "（読めなかった ${failed.get()} 件は除く）" else ""
+        toast(if (cancelRequested) "${books.size} 冊を追加して中止しました" else "${books.size} 冊を本棚に追加しました$grouped$tail")
     }
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)

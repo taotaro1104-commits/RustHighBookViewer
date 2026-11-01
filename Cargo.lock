@@ -3364,11 +3364,14 @@ dependencies = [
 name = "pv-container"
 version = "0.1.3"
 dependencies = [
+ "ab_glyph",
  "bytes",
  "chardetng",
+ "crc32fast",
  "encoding_rs",
  "fs4",
  "natord",
+ "png",
  "regex",
  "roxmltree",
  "sevenz-rust2",
