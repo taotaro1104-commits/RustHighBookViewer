@@ -28,6 +28,7 @@
                 <data android:mimeType="application/x-rar-compressed" />
                 <data android:mimeType="application/x-cbr" />
                 <data android:mimeType="application/x-cb7" />
+                <data android:mimeType="application/epub+zip" />
             </intent-filter>
         </activity>
     </application>

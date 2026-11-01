@@ -23,7 +23,7 @@ pub struct EntryMeta {
 const IMAGE_EXTS: &[&str] = &[
     "jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic", "jxl",
 ];
-const ARCHIVE_EXTS: &[&str] = &["zip", "cbz", "7z", "cb7", "rar", "cbr"];
+const ARCHIVE_EXTS: &[&str] = &["zip", "cbz", "7z", "cb7", "rar", "cbr", "epub"];
 
 pub fn kind_from_path(path: &str) -> EntryKind {
     let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());

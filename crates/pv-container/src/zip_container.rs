@@ -6,6 +6,7 @@ use zip::ZipArchive;
 
 use crate::container::{Container, ContainerProvider, Limits, Probe};
 use crate::entry::{kind_from_path, natural_cmp, EntryId, EntryKind, EntryMeta};
+use crate::epub::EpubContainer;
 use crate::error::{ContainerError, Result};
 use crate::path::{decode_name, normalize_path};
 use crate::source::{MemorySource, Source, SourceReader};
@@ -28,10 +29,12 @@ impl ContainerProvider for ZipProvider {
     }
 
     fn open(&self, src: Arc<dyn Source>) -> Result<Arc<dyn Container>> {
-        Ok(Arc::new(ZipContainer::open(
-            src,
-            self.limits.unwrap_or_default(),
-        )?))
+        let zip = ZipContainer::open(src, self.limits.unwrap_or_default())?;
+        // EPUB（コミック・写真集）なら、spine の順に画像を並べる。読めなければ通常の ZIP として扱う
+        Ok(match EpubContainer::from_zip(zip) {
+            Ok(epub) => Arc::new(epub),
+            Err(zip) => Arc::new(zip),
+        })
     }
 }
 

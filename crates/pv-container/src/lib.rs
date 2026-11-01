@@ -2,6 +2,7 @@
 
 mod container;
 mod entry;
+mod epub;
 mod error;
 mod extract;
 mod folder;
@@ -16,6 +17,7 @@ pub use container::{
     Probe,
 };
 pub use entry::{kind_from_path, natural_cmp, EntryId, EntryKind, EntryMeta};
+pub use epub::EpubContainer;
 pub use error::{ContainerError, Result};
 pub use extract::{ExtractGuard, ExtractedContainer, Extractor};
 pub use folder::FolderContainer;

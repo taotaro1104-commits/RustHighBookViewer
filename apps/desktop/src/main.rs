@@ -83,7 +83,10 @@ impl eframe::App for App {
             Some(ShelfAction::Open(p)) => self.open(&p),
             Some(ShelfAction::OpenDialogFile) => {
                 if let Some(p) = rfd::FileDialog::new()
-                    .add_filter("コミック書庫", &["zip", "cbz"])
+                    .add_filter(
+                        "コミック書庫",
+                        &["zip", "cbz", "7z", "cb7", "rar", "cbr", "epub"],
+                    )
                     .pick_file()
                 {
                     self.open(&p);
