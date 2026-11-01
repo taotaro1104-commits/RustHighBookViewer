@@ -69,7 +69,12 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Button(onClick = onPickFile, enabled = !state.busy) { Text(if (state.busy) "読み込み中…" else "ファイル") }
+            if (state.busy) {
+                // 大きな 7z / RAR は展開に時間がかかるため、途中でやめられるようにする
+                Button(onClick = { state.cancelOpen() }) { Text("読み込み中… キャンセル") }
+            } else {
+                Button(onClick = onPickFile) { Text("ファイル") }
+            }
             Button(onClick = onPickFolder, enabled = !state.busy) { Text("フォルダ") }
             Tab.entries.forEach { t ->
                 FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(t.label) })

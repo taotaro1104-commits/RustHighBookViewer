@@ -6,6 +6,7 @@ use bytes::Bytes;
 
 use crate::entry::{EntryId, EntryMeta};
 use crate::error::{ContainerError, Result};
+use crate::extract::ExtractGuard;
 use crate::folder::FolderContainer;
 use crate::rar::RarProvider;
 use crate::sevenz::SevenZProvider;
@@ -94,6 +95,15 @@ pub fn open_source(src: Arc<dyn Source>) -> Result<Arc<dyn Container>> {
 
 /// `scratch` は 7z / RAR を展開する作業領域（コンテナを手放すと中身は消える）。
 pub fn open_source_in(src: Arc<dyn Source>, scratch: &Path) -> Result<Arc<dyn Container>> {
+    open_source_with(src, scratch, &ExtractGuard::default())
+}
+
+/// `guard` で 7z / RAR の展開を途中で止めたり、空き容量の下限を指定したりできる。
+pub fn open_source_with(
+    src: Arc<dyn Source>,
+    scratch: &Path,
+    guard: &ExtractGuard,
+) -> Result<Arc<dyn Container>> {
     let zip = ZipProvider::default();
     // 7z / RAR は端末の保存領域へ展開するため、ZIP（読み出し時に展開）より厳しい合計上限にする
     let limits = Limits {
@@ -103,10 +113,12 @@ pub fn open_source_in(src: Arc<dyn Source>, scratch: &Path) -> Result<Arc<dyn Co
     let sevenz = SevenZProvider {
         scratch: scratch.to_path_buf(),
         limits,
+        guard: guard.clone(),
     };
     let rar = RarProvider {
         scratch: scratch.to_path_buf(),
         limits,
+        guard: guard.clone(),
     };
     let providers: [&dyn ContainerProvider; 3] = [&zip, &sevenz, &rar];
     for p in providers {

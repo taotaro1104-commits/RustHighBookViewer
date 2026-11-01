@@ -8,6 +8,8 @@ pub enum ContainerError {
     Zip(#[from] zip::result::ZipError),
     #[error("archive error: {0}")]
     Archive(String),
+    #[error("cancelled")]
+    Cancelled,
     #[error("unsupported format")]
     Unsupported,
     #[error("entry {0} not found")]

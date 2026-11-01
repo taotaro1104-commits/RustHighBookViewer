@@ -122,7 +122,7 @@ fun PageGridDialog(reader: PvReader, currentPage: Int, onPick: (Int) -> Unit, on
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    items((0 until total).toList(), key = { it }) { page ->
+                    items(count = total, key = { it }) { page ->
                         val bmp: Bitmap? by produceState(cache.get(page), page) {
                             if (value == null) {
                                 value = gate.withPermit {

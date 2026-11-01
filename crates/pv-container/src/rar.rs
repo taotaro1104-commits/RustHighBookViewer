@@ -6,7 +6,7 @@ use unrar::Archive;
 use crate::container::{Container, ContainerProvider, Limits, Probe};
 use crate::entry::{kind_from_path, EntryKind};
 use crate::error::{ContainerError, Result};
-use crate::extract::{spill_to_file, ExtractedContainer};
+use crate::extract::{spill_to_file, ExtractGuard, ExtractedContainer};
 use crate::path::normalize_path;
 use crate::source::Source;
 
@@ -19,6 +19,7 @@ const MAGIC: &[u8; 6] = b"Rar!\x1a\x07";
 pub struct RarProvider {
     pub scratch: PathBuf,
     pub limits: Limits,
+    pub guard: ExtractGuard,
 }
 
 fn archive_err(e: unrar::error::UnrarError) -> ContainerError {
@@ -41,8 +42,8 @@ impl ContainerProvider for RarProvider {
         let spill = tempfile::Builder::new()
             .prefix("pv-r-")
             .tempdir_in(&self.scratch)?;
-        let path = spill_to_file(src.as_ref(), spill.path(), "src.rar")?;
-        let c = ExtractedContainer::build(&self.scratch, self.limits, |ex| {
+        let path = spill_to_file(src.as_ref(), spill.path(), "src.rar", &self.guard)?;
+        let c = ExtractedContainer::build(&self.scratch, self.limits, &self.guard, |ex| {
             let mut cursor = Archive::new(&path)
                 .open_for_processing()
                 .map_err(archive_err)?;

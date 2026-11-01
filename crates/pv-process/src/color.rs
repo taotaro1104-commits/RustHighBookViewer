@@ -66,6 +66,9 @@ pub(crate) fn apply(mut bmp: Bitmap, adj: ColorAdjust) -> Bitmap {
             .0
             .iter_mut()
         {
+            if px[3] == 0 {
+                continue; // 完全に透明な画素は色を変えない
+            }
             let (mut r, mut g, mut b) = (
                 lut[px[0] as usize],
                 lut[px[1] as usize],
@@ -202,5 +205,16 @@ mod tests {
         };
         let _ = run(c, [1, 2, 3, 4]);
         assert_eq!(c.clamped().contrast, -100);
+    }
+
+    #[test]
+    fn fully_transparent_pixels_are_left_untouched() {
+        // 透明画素の RGB を変えると、premultiplied として扱う描画側で色が化ける
+        let c = ColorAdjust {
+            invert: true,
+            ..Default::default()
+        };
+        assert_eq!(run(c, [0, 0, 0, 0]), [0, 0, 0, 0]);
+        assert_eq!(run(c, [10, 20, 30, 1]), [245, 235, 225, 1]);
     }
 }

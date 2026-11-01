@@ -23,7 +23,11 @@ private const val DESTROY_DELAY_MS = 600L
 
 /** アプリ全体の状態。画面回転では Activity を作り直さない（Manifest の configChanges）ので単純な保持で足りる。 */
 class AppState private constructor(private val context: Context) {
-    val core: PvCore = PvCore(context.filesDir.resolve("pv").absolutePath)
+    /**
+     * 初回アクセス時に作る。SQLite を開き、前回異常終了で残った展開物を掃除するため重いので、
+     * Main スレッドの Activity 生成では作らない（最初に触るのは本棚の読み込み = IO スレッド）。
+     */
+    val core: PvCore by lazy { PvCore(context.filesDir.resolve("pv").absolutePath) }
 
     /** 開いている本。null なら本棚を表示する */
     var reader: PvReader? by mutableStateOf(null)
@@ -35,6 +39,17 @@ class AppState private constructor(private val context: Context) {
 
     var busy by mutableStateOf(false)
         private set
+
+    /** 「開く」をユーザーが中断した。エラー表示を出さないための印 */
+    @Volatile
+    private var cancelRequested = false
+
+    /** 7z / RAR の展開など、時間のかかる「開く」を中断する。 */
+    fun cancelOpen() {
+        if (!busy) return
+        cancelRequested = true
+        core.cancelOpen()
+    }
 
     /** 閲覧中だけ設定される。音量キーを押したとき処理したら true を返す */
     var volumeHandler: ((Boolean) -> Boolean)? = null
@@ -48,6 +63,7 @@ class AppState private constructor(private val context: Context) {
     suspend fun open(uri: Uri) {
         if (busy) return // 連打・外部インテントとの並行オープンを防ぐ
         busy = true
+        cancelRequested = false
         try {
             val opened = withContext(Dispatchers.IO) {
                 if (DocumentsContract.isTreeUri(uri) && !isDocumentUri(uri)) {
@@ -65,7 +81,7 @@ class AppState private constructor(private val context: Context) {
         } catch (e: SecurityException) {
             toast("この本へのアクセス権がありません。もう一度ファイルを選んでください")
         } catch (e: Exception) {
-            toast("開けませんでした: ${e.message}")
+            toast(if (cancelRequested) "キャンセルしました" else "開けませんでした: ${e.message}")
         } finally {
             busy = false
         }

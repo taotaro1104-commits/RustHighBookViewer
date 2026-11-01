@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam_channel::Receiver;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use pv_core::{BookOverride, BookSession, CoreEvent, InputKey, InputMap, PageThumbs, Size};
 use pv_library::{now_ms, Library};
 
@@ -68,14 +68,18 @@ impl PvReader {
     }
 
     /// 書庫ごとの設定を保存し、綴じ方向が変わっていれば入力マップを作り直す。
-    fn after_settings_change(&self, session: &BookSession) {
-        if let Ok(json) = serde_json::to_string(&Self::current_override(session)) {
+    /// 必要な値を取り出したらセッションのロックを手放してから DB に書く（他の操作を待たせない）。
+    fn after_settings_change(&self, session: MutexGuard<'_, BookSession>) {
+        let json = serde_json::to_string(&Self::current_override(&session));
+        let direction = session.settings().layout.direction;
+        drop(session);
+        if let Ok(json) = json {
             if let Err(e) = self.library.set_book_settings(self.book_id, &json) {
                 eprintln!("book settings not saved: {e}");
             }
         }
         if !self.custom_input {
-            *self.input.lock() = InputMap::standard(session.settings().layout.direction);
+            *self.input.lock() = InputMap::standard(direction);
         }
     }
 }
@@ -136,7 +140,7 @@ impl PvReader {
         l.mode = mode.into();
         l.direction = direction.into();
         s.set_layout(l);
-        self.after_settings_change(&s);
+        self.after_settings_change(s);
     }
 
     pub fn color(&self) -> PvColor {
@@ -147,7 +151,7 @@ impl PvReader {
     pub fn set_color(&self, color: PvColor) {
         let mut s = self.session.lock();
         s.set_color(color.into());
-        self.after_settings_change(&s);
+        self.after_settings_change(s);
     }
 
     /// ページ一覧用の小さなサムネイル。デコードに失敗したページは None。
@@ -184,7 +188,7 @@ impl PvReader {
                     | PvAction::FitPage
             )
         {
-            self.after_settings_change(&s);
+            self.after_settings_change(s);
         }
         handled
     }
@@ -246,14 +250,17 @@ impl PvReader {
 
     /// 読書位置を保存する。`force` が false なら、ページが変わったときだけ書く。
     pub fn save_progress(&self, force: bool) -> PvResult<()> {
-        let s = self.session.lock();
-        let page = s.current_page();
+        let (page, cursor) = {
+            let s = self.session.lock();
+            (s.current_page(), s.cursor())
+        };
         let mut saved = self.saved_page.lock();
         if !force && *saved == Some(page) {
             return Ok(());
         }
+        // DB への書き込みはセッションのロックを手放してから行う
         self.library
-            .save_progress(self.book_id, s.cursor(), page, now_ms())
+            .save_progress(self.book_id, cursor, page, now_ms())
             .map_err(PvError::new)?;
         *saved = Some(page);
         Ok(())

@@ -8,6 +8,7 @@ license.workspace = true
 bytes = "1.12.1"
 chardetng = "1.0.0"
 encoding_rs = "0.8.44"
+fs4 = "1.1.0"
 natord = "1.0.9"
 sevenz-rust2 = "0.24.2"
 tempfile = "3.27.0"

@@ -1,12 +1,14 @@
 //! アプリ全体の窓口: ライブラリ・設定・サムネイル・本を開く処理。
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use pv_container::{open_source_with, ExtractGuard};
 use pv_core::{
-    make_thumbnail_from, open_source_in, BookOverride, BookSession, Container, DiskCache,
-    FileSource, Settings, Source,
+    make_thumbnail_from, BookOverride, BookSession, Container, DiskCache, FileSource, Settings,
+    Source,
 };
 use pv_library::{BookFilter, BookKey, BookSort, Library, NewBook, HEAD_LEN};
 
@@ -24,6 +26,8 @@ pub struct PvCore {
     disk: DiskCache,
     /// 7z / RAR の展開先。起動ごとに空にする
     scratch: PathBuf,
+    /// 7z / RAR の展開を途中で止める合図。新しく開くたびに下ろす
+    cancel: Arc<AtomicBool>,
 }
 
 fn fnv(s: &str) -> u64 {
@@ -59,7 +63,14 @@ impl PvCore {
             settings: Mutex::new(settings),
             disk,
             scratch,
+            cancel: Arc::default(),
         }))
+    }
+
+    /// 実行中の「開く」を中断する（7z / RAR の展開など時間のかかる処理が対象。別スレッドから呼ぶ）。
+    /// 中断された `open_*` は `Cancelled` 相当のエラーを返す。
+    pub fn cancel_open(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
     }
 
     /// content:// から得た fd（所有権ごと渡す）で書庫を開く。`uri` はライブラリでの識別・再オープン用。
@@ -69,6 +80,7 @@ impl PvCore {
         uri: String,
         title: String,
     ) -> PvResult<Arc<PvReader>> {
+        self.cancel.store(false, Ordering::Relaxed);
         let src = source_from_fd(fd).map_err(PvError::new)?;
         self.open_source_inner(src, uri, title)
     }
@@ -80,6 +92,7 @@ impl PvCore {
         uri: String,
         title: String,
     ) -> PvResult<Arc<PvReader>> {
+        self.cancel.store(false, Ordering::Relaxed);
         let container = TreeContainer::from_tree(tree).map_err(PvError::new)?;
         let key = BookKey::from_listing(container.listing());
         self.open_container_inner(Arc::new(container), key, uri, title)
@@ -87,6 +100,7 @@ impl PvCore {
 
     /// ファイルパスで開く（テスト・デスクトップ向け）。
     pub fn open_path(self: Arc<Self>, path: String) -> PvResult<Arc<PvReader>> {
+        self.cancel.store(false, Ordering::Relaxed);
         let p = Path::new(&path);
         let src: Arc<dyn Source> = Arc::new(FileSource::open(p).map_err(PvError::new)?);
         let title = p
@@ -157,8 +171,12 @@ impl PvCore {
         let n = read_fully(src.as_ref(), &mut head).map_err(PvError::new)?;
         let key = BookKey::from_head(size, &head[..n]);
 
+        let guard = ExtractGuard {
+            cancel: Arc::clone(&self.cancel),
+            ..ExtractGuard::default()
+        };
         let container: Arc<dyn Container> =
-            open_source_in(src, &self.scratch).map_err(PvError::new)?;
+            open_source_with(src, &self.scratch, &guard).map_err(PvError::new)?;
         self.open_container_inner(container, key, uri, title)
     }
 
