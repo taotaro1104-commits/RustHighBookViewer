@@ -1,0 +1,13 @@
+[package]
+name = "pv-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+pv-container = { version = "0.1.0", path = "../../crates/pv-container" }
+pv-decode = { version = "0.1.0", path = "../../crates/pv-decode" }
+
+[lints]
+workspace = true

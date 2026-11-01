@@ -1,0 +1,18 @@
+[package]
+name = "desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dirs = "7.0.0"
+eframe = "0.37.0"
+pv-core = { version = "0.1.0", path = "../../crates/pv-core" }
+pv-library = { version = "0.1.0", path = "../../crates/pv-library" }
+pv-render = { version = "0.1.0", path = "../../crates/pv-render" }
+rfd = "0.17.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[lints]
+workspace = true

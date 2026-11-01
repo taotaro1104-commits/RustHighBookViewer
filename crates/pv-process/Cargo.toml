@@ -1,0 +1,13 @@
+[package]
+name = "pv-process"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fast_image_resize = "6.1.0"
+pv-decode = { version = "0.1.0", path = "../pv-decode" }
+serde = { version = "1.0.229", features = ["derive"] }
+
+[lints]
+workspace = true

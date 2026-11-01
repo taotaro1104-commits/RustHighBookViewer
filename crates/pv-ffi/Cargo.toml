@@ -1,0 +1,35 @@
+[package]
+name = "pv-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bytes = "1.12.1"
+crossbeam-channel = "0.5.17"
+parking_lot = "0.13.0"
+pv-container = { version = "0.1.0", path = "../pv-container" }
+pv-core = { version = "0.1.0", path = "../pv-core" }
+pv-library = { version = "0.1.0", path = "../pv-library" }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+uniffi = "0.32.2"
+
+[dev-dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+tempfile = "3.27.0"
+zip = { version = "9.2.0", default-features = false, features = ["deflate"] }
+sevenz-rust2 = "0.24.2"
+
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+# Kotlin バインディング生成用 CLI（cargo run --features bindgen --bin uniffi-bindgen）
+bindgen = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]

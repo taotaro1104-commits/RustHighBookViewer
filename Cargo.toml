@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "apps/desktop", "apps/pv-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"
+codegen-units = 1
+
+# unrar_sys 0.5.8 のビルドスクリプトはホスト OS で分岐するため、Android クロスビルド用にパッチ版を使う
+[patch.crates-io]
+unrar_sys = { path = "vendor/unrar_sys" }

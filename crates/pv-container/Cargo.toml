@@ -1,0 +1,22 @@
+[package]
+name = "pv-container"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bytes = "1.12.1"
+chardetng = "1.0.0"
+encoding_rs = "0.8.44"
+natord = "1.0.9"
+sevenz-rust2 = "0.24.2"
+tempfile = "3.27.0"
+thiserror = "2.0.21"
+unrar = "0.5.8"
+zip = "9.2.0"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
