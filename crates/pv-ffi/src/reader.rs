@@ -280,11 +280,8 @@ impl PvReader {
 
     /// 処理前の元バイト列（画像の保存・共有用）。
     pub fn page_bytes(&self, page: u32) -> PvResult<Vec<u8>> {
-        let bytes = self
-            .session
-            .lock()
-            .page_bytes(page as usize)
-            .map_err(PvError::new)?;
+        // セッションのロックを持たずに読む（SAF など遅い入力でも他の操作を止めない）
+        let bytes = self.thumbs.bytes(page as usize).map_err(PvError::new)?;
         Ok(bytes.to_vec())
     }
 

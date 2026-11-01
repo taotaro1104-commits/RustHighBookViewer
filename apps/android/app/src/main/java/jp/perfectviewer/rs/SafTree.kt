@@ -52,7 +52,9 @@ class SafTree(private val context: Context, private val treeUri: Uri) : PvTree {
         )
         val subdirs = ArrayList<Pair<String, String>>()
         context.contentResolver.query(children, cols, null, null, null)?.use { c ->
-            while (c.moveToNext() && out.size < MAX_FILES) {
+            while (c.moveToNext()) {
+                // 黙って切り詰めるとページ欠けや本の識別子の変化に気付けないので、エラーにする
+                if (out.size >= MAX_FILES) throw PvException.Failed("ファイルが多すぎます（上限 $MAX_FILES）")
                 val id = c.getString(0)
                 val name = c.getString(1) ?: continue
                 val path = prefix + name

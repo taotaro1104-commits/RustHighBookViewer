@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
@@ -41,7 +42,8 @@ class MainActivity : ComponentActivity() {
                 val reader = state.reader
                 Box(Modifier.fillMaxSize()) {
                     if (reader != null) {
-                        ReaderScreen(state, reader)
+                        // 本ごとに状態（ページ・要求中フレーム等）を作り直す
+                        key(reader) { ReaderScreen(state, reader) }
                     } else {
                         Box(Modifier.statusBarsPadding()) {
                             ShelfScreen(

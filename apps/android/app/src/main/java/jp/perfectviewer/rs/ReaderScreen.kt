@@ -144,33 +144,38 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
     LaunchedEffect(reader) {
         withContext(Dispatchers.IO) {
             while (isActive) {
-                // 本を閉じた直後に破棄済みになることがある。そのときはループを終える
-                val ev = try {
-                    reader.nextEvent(100u)
-                } catch (e: IllegalStateException) {
-                    break
-                } ?: continue
-                when (ev) {
-                    is PvEvent.Frame -> {
-                        val f = ev.frame
-                        if (f.spread != reader.cursor() || f.ticket != latestTicket) continue // 古いフレームは捨てる
-                        val bmp = rgbaToBitmap(f.width, f.height, f.rgba)
-                        withContext(Dispatchers.Main) {
-                            val key = FrameKey(f.spread.toInt(), f.viewportWidth.toInt(), f.viewportHeight.toInt(), f.scale)
-                            val newPage = shown?.spread != key.spread
-                            val topAligned = reader.layout().fit == PvFit.WIDTH
-                            surfaceHolder[0]?.setFrame(bmp, f.scale, newPage, topAligned)
-                            shown = key
-                            if (pending == key) pending = null
-                            if (newPage) zoomLevel = 1f
-                            requestIfNeeded()
+                // 本を閉じた直後に破棄済みになることがある。どこで投げられてもループを終える
+                try {
+                    val ev = reader.nextEvent(100u) ?: continue
+                    when (ev) {
+                        is PvEvent.Frame -> {
+                            val f = ev.frame
+                            if (f.spread != reader.cursor() || f.ticket != latestTicket) continue // 古いフレームは捨てる
+                            val bmp = rgbaToBitmap(f.width, f.height, f.rgba)
+                            withContext(Dispatchers.Main) {
+                                val key = FrameKey(f.spread.toInt(), f.viewportWidth.toInt(), f.viewportHeight.toInt(), f.scale)
+                                val newPage = shown?.spread != key.spread
+                                val topAligned = reader.layout().fit == PvFit.WIDTH
+                                surfaceHolder[0]?.setFrame(bmp, f.scale, newPage, topAligned)
+                                shown = key
+                                if (pending == key) pending = null
+                                if (newPage) zoomLevel = 1f
+                                requestIfNeeded()
+                            }
+                        }
+                        // 取り消し・失敗も最新の要求のものだけ扱う（古い要求の遅れた通知で状態を巻き戻さない）
+                        is PvEvent.Cancelled -> if (ev.ticket == latestTicket) {
+                            withContext(Dispatchers.Main) { pending = null; requestIfNeeded() }
+                        }
+                        is PvEvent.Failed -> if (ev.ticket == latestTicket) {
+                            withContext(Dispatchers.Main) {
+                                pending = null
+                                state.toast("表示エラー: ${ev.message}")
+                            }
                         }
                     }
-                    is PvEvent.Cancelled -> withContext(Dispatchers.Main) { pending = null; requestIfNeeded() }
-                    is PvEvent.Failed -> withContext(Dispatchers.Main) {
-                        pending = null
-                        state.toast("表示エラー: ${ev.message}")
-                    }
+                } catch (e: IllegalStateException) {
+                    break
                 }
             }
         }
@@ -223,7 +228,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
         if (showColor) {
             ColorDialog(
                 initial = reader.color(),
-                onChange = { reader.setColor(it); redraw() },
+                onChange = { c -> scope.launch { withContext(Dispatchers.IO) { reader.setColor(c) }; redraw() } },
                 onDismiss = { showColor = false },
             )
         }
@@ -273,21 +278,27 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                             ).forEach { (m, label) ->
                                 DropdownMenuItem(text = { Text(label) }, onClick = {
                                     modeMenu = false
-                                    if (m == PvViewMode.WEBTOON) reader.apply(PvAction.FIT_WIDTH)
-                                    reader.setLayout(m, layout.direction)
-                                    refreshPage()
-                                    shown = null
-                                    requestIfNeeded()
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            if (m == PvViewMode.WEBTOON) reader.apply(PvAction.FIT_WIDTH)
+                                            reader.setLayout(m, layout.direction)
+                                        }
+                                        refreshPage()
+                                        redraw()
+                                    }
                                 })
                             }
                         }
                     }
                     val rtl = layout.direction == PvDirection.RIGHT_TO_LEFT
                     TextButton(onClick = {
-                        reader.setLayout(layout.mode, if (rtl) PvDirection.LEFT_TO_RIGHT else PvDirection.RIGHT_TO_LEFT)
-                        refreshPage()
-                        shown = null
-                        requestIfNeeded()
+                        scope.launch {
+                            withContext(Dispatchers.IO) {
+                                reader.setLayout(layout.mode, if (rtl) PvDirection.LEFT_TO_RIGHT else PvDirection.RIGHT_TO_LEFT)
+                            }
+                            refreshPage()
+                            redraw()
+                        }
                     }) { Text(if (rtl) "右綴じ" else "左綴じ") }
                     listOf(PvFit.WIDTH to "幅", PvFit.HEIGHT to "高さ", PvFit.PAGE to "全体").forEach { (fit, label) ->
                         FilterChip(selected = layout.fit == fit, onClick = {

@@ -25,6 +25,8 @@ use crate::settings::Settings;
 
 /// 画像ヘッダから寸法を読むための先頭バイト数
 const PROBE_BYTES: usize = 64 * 1024;
+/// 先読みで作るビットマップの倍率の上限
+const PREFETCH_MAX_SCALE: f32 = 2.0;
 const PLACEHOLDER: (u32, u32) = (100, 150);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,6 +61,11 @@ pub struct BookSession {
 pub struct PageThumbs(Arc<Inner>);
 
 impl PageThumbs {
+    /// 処理前の元バイト列。セッションのロックを取らないので、遅い読み出しが他の操作を止めない。
+    pub fn bytes(&self, page: usize) -> Result<Bytes> {
+        self.0.raw(page)
+    }
+
     pub fn get(&self, page: usize, edge: u32) -> Result<pv_decode::Bitmap> {
         self.0.page_thumbnail(page, edge)
     }
@@ -203,6 +210,8 @@ impl BookSession {
         let c = &self.settings.cache;
         let fwd = (1..=c.prefetch_forward).map(|d| self.cursor + d);
         let back = (1..=c.prefetch_back).filter_map(|d| self.cursor.checked_sub(d));
+        // 拡大中でも先読みは等倍付近に抑える（8 倍の全面ビットマップを複数枚同時に作ると Android で OOM になる）
+        let scale = scale.min(PREFETCH_MAX_SCALE);
         for idx in fwd.chain(back).filter(|&i| i < self.spreads.len()) {
             self.enqueue(idx, vp, scale, None);
         }

@@ -46,6 +46,7 @@ class AppState private constructor(private val context: Context) {
 
     /** content:// の書庫を開く。fd は Rust 側へ所有権ごと渡し、以降の読み出しは pread で行う。 */
     suspend fun open(uri: Uri) {
+        if (busy) return // 連打・外部インテントとの並行オープンを防ぐ
         busy = true
         try {
             val opened = withContext(Dispatchers.IO) {
@@ -58,7 +59,9 @@ class AppState private constructor(private val context: Context) {
                     core.openFd(pfd.detachFd(), uri.toString(), displayName(uri))
                 }
             }
+            val old = reader
             reader = opened
+            old?.let { release(it) } // 閲覧中に別の本を開いた場合、旧 reader を残さない
         } catch (e: SecurityException) {
             toast("この本へのアクセス権がありません。もう一度ファイルを選んでください")
         } catch (e: Exception) {
@@ -74,13 +77,17 @@ class AppState private constructor(private val context: Context) {
     fun close() {
         val r = reader ?: return
         reader = null
+        release(r)
+        shelfVersion++
+    }
+
+    private fun release(r: PvReader) {
         runCatching { r.saveProgress(true) }
         // 閲覧画面のイベントループが nextEvent で待っている可能性があるため、止まるまで待ってから破棄する
         CoroutineScope(Dispatchers.IO).launch {
             delay(DESTROY_DELAY_MS)
             runCatching { r.close() }
         }
-        shelfVersion++
     }
 
     fun onTrimMemory() {
