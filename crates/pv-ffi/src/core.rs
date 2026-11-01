@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use pv_container::{
-    kind_from_path, open_source_with, scan_books, EntryKind, ExtractGuard, FolderContainer,
+    kind_from_path, open_source_styled, scan_books, EntryKind, ExtractGuard, FolderContainer,
     ScanKind,
 };
 use pv_core::{
@@ -16,7 +16,7 @@ use pv_core::{
 use pv_library::{BookFilter, BookKey, BookSort, Library, NewBook, HEAD_LEN};
 
 use crate::fd::source_from_fd;
-use crate::reader::PvReader;
+use crate::reader::{PvReader, ReaderInfo};
 use crate::tree::{PvTree, TreeContainer};
 use crate::types::*;
 
@@ -102,6 +102,43 @@ impl PvCore {
         updated.save(&self.settings_path).map_err(PvError::new)?;
         *guard = updated;
         Ok(())
+    }
+
+    /// エラーメッセージの言語を切り替える（"ja" / "en" / "zh" / "ko" / "es"）。
+    pub fn set_language(&self, code: String) {
+        crate::i18n::set_lang(crate::i18n::Lang::from_code(&code));
+    }
+
+    /// 文章の EPUB の文字の大きさ・書体。
+    pub fn text_style(&self) -> PvTextStyle {
+        let t = self.settings.lock().text;
+        PvTextStyle {
+            size: t.font_px,
+            typeface: t.typeface.into(),
+        }
+    }
+
+    /// 文章の EPUB の見た目を保存する。次に開く本から使う（開いている本は、開き直すと反映される）。
+    /// 範囲外の大きさは収める。
+    pub fn set_text_style(&self, style: PvTextStyle) -> PvResult<()> {
+        let mut guard = self.settings.lock();
+        let mut updated = guard.clone();
+        updated.text = pv_container::TextStyle {
+            font_px: style.size,
+            typeface: style.typeface.into(),
+        }
+        .clamped();
+        updated.save(&self.settings_path).map_err(PvError::new)?;
+        *guard = updated;
+        Ok(())
+    }
+
+    /// 端末で使える書体（明朝体は端末にフォントが無いことがある）。
+    pub fn available_typefaces(&self) -> Vec<PvTypeface> {
+        [PvTypeface::Gothic, PvTypeface::Mincho]
+            .into_iter()
+            .filter(|t| pv_container::has_typeface((*t).into()))
+            .collect()
     }
 
     /// すべての本の「本ごとの設定」（表示モード・綴じ方向・フィット・色調整）を消す。
@@ -332,7 +369,8 @@ impl PvCore {
             cancel: Arc::clone(&self.cancel),
             ..ExtractGuard::default()
         };
-        let container = open_source_with(src, &self.scratch, &guard).map_err(PvError::open)?;
+        let container = open_source_styled(src, &self.scratch, &guard, self.settings.lock().text)
+            .map_err(PvError::open)?;
         Ok(Prepared {
             container,
             key,
@@ -402,7 +440,8 @@ impl PvCore {
             ..ExtractGuard::default()
         };
         let container: Arc<dyn Container> =
-            open_source_with(src, &self.scratch, &guard).map_err(PvError::open)?;
+            open_source_styled(src, &self.scratch, &guard, self.settings.lock().text)
+                .map_err(PvError::open)?;
         self.open_container_inner(container, key, uri, title)
     }
 
@@ -414,6 +453,7 @@ impl PvCore {
         title: String,
     ) -> PvResult<Arc<PvReader>> {
         let settings = self.settings.lock().clone();
+        let uri_for_reader = uri.clone();
         let (book, page_count) =
             self.register_container(container.as_ref(), &key, uri, title.clone())?;
         let now = pv_library::now_ms();
@@ -448,10 +488,11 @@ impl PvCore {
                 }
                 Err(e) => eprintln!("book settings ignored: {e}"),
             },
-            // 文章の本は、何も設定していなければ単ページで開く
+            // 文章の本（縦書き）は、何も設定していなければ単ページ・右綴じで開く
             _ if container.is_text() => {
                 let mut layout = settings.layout;
                 layout.mode = pv_core::ViewMode::Single;
+                layout.direction = pv_core::Direction::RightToLeft;
                 session.set_layout(layout);
             }
             _ => {}
@@ -476,6 +517,10 @@ impl PvCore {
             book.id,
             title,
             sizes_saved,
+            ReaderInfo {
+                uri: uri_for_reader,
+                is_text: container.is_text(),
+            },
         )))
     }
 }

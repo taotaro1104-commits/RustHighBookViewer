@@ -17,8 +17,10 @@ use crate::epub::{
     CONTAINER_XML, MAX_SPINE,
 };
 use crate::error::{ContainerError, Result};
-use crate::font::shared_font;
+use crate::font::font_for;
 use crate::text_layout::{paginate, parse_xhtml, Block, Page, PageSpec};
+use crate::text_style::TextStyle;
+use crate::text_vertical::{draw_vertical, Canvas};
 use crate::zip_container::ZipContainer;
 
 const PAPER: u8 = 245;
@@ -38,13 +40,20 @@ pub struct TextEpubContainer {
 impl TextEpubContainer {
     /// 文章の EPUB なら成功する。EPUB でない・本文が無いときは ZIP をそのまま返す。
     /// 文章の EPUB なのに日本語フォントが見つからないときだけエラー。
-    pub fn try_open(zip: ZipContainer) -> Result<std::result::Result<Self, ZipContainer>> {
+    /// 見た目（文字の大きさ・書体）を指定して開く。
+    pub fn try_open_with(
+        zip: ZipContainer,
+        style: TextStyle,
+    ) -> Result<std::result::Result<Self, ZipContainer>> {
         let chapters = spine_chapters(&zip);
         if chapters.iter().all(Vec::is_empty) {
             return Ok(Err(zip));
         }
-        let font = shared_font().ok_or(ContainerError::NoFont)?;
-        let spec = PageSpec::default();
+        let font = font_for(style.typeface).ok_or(ContainerError::NoFont)?;
+        let spec = PageSpec {
+            font_px: style.font_px as f32,
+            ..PageSpec::default()
+        };
         let cache: RefCell<HashMap<(char, u32), f32>> = RefCell::new(HashMap::new());
         let adv = |c: char, size: f32| -> f32 {
             *cache
@@ -83,6 +92,23 @@ impl TextEpubContainer {
         let (w, h) = (self.spec.width as usize, self.spec.height as usize);
         let mut buf = vec![PAPER; w * h];
         for line in &page.lines {
+            if self.spec.vertical {
+                let mut canvas = Canvas {
+                    buf: &mut buf,
+                    w,
+                    h,
+                };
+                draw_vertical(
+                    &self.font,
+                    &mut canvas,
+                    line.x,
+                    line.y,
+                    line.size,
+                    &line.text,
+                    INK,
+                );
+                continue;
+            }
             let ascent = self.font.as_scaled(PxScale::from(line.size)).ascent();
             draw_text(
                 &self.font,
@@ -265,6 +291,7 @@ mod tests {
     use super::*;
     use crate::container::Limits;
     use crate::source::MemorySource;
+    use crate::text_style::Typeface;
     use std::io::Write;
 
     fn zip_bytes(files: &[(&str, &str)]) -> Vec<u8> {
@@ -320,14 +347,40 @@ mod tests {
         assert_eq!(ch[0][0], Block::Heading(2, "第1話".into()));
     }
 
+    /// 文字を大きくするとページ数が増え、書体を変えても開ける（明朝体が無い環境ではゴシック体で代用）
+    #[test]
+    fn style_changes_pagination() {
+        if font_for(Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let pages = |px, face| {
+            let style = TextStyle {
+                font_px: px,
+                typeface: face,
+            };
+            let Ok(Ok(c)) = TextEpubContainer::try_open_with(novel(), style) else {
+                panic!("text epub should open");
+            };
+            c.entries().len()
+        };
+        let (small, normal, large) = (
+            pages(32, Typeface::Gothic),
+            pages(44, Typeface::Gothic),
+            pages(64, Typeface::Gothic),
+        );
+        assert!(small < normal && normal < large, "{small} {normal} {large}");
+        assert!(pages(44, Typeface::Mincho) >= 2);
+    }
+
     /// フォントがある環境でだけ、実際に描いて確かめる
     #[test]
     fn pages_render_when_a_font_is_available() {
-        let Some(_) = shared_font() else {
+        let Some(_) = font_for(Typeface::Gothic) else {
             eprintln!("skipped: no CJK font on this machine");
             return;
         };
-        let Ok(Ok(c)) = TextEpubContainer::try_open(novel()) else {
+        let Ok(Ok(c)) = TextEpubContainer::try_open_with(novel(), TextStyle::default()) else {
             panic!("text epub should open");
         };
         assert!(
@@ -360,13 +413,13 @@ fn bench_real_text_epub() {
     .unwrap();
     eprintln!("zip open: {:?}", t.elapsed());
     let t = std::time::Instant::now();
-    let _ = shared_font().expect("font");
+    let _ = font_for(crate::text_style::Typeface::Gothic).expect("font");
     eprintln!("font load: {:?}", t.elapsed());
     let t = std::time::Instant::now();
     let chapters = spine_chapters(&zip);
     eprintln!("parse {} chapters: {:?}", chapters.len(), t.elapsed());
     let t = std::time::Instant::now();
-    let Ok(Ok(c)) = TextEpubContainer::try_open(zip) else {
+    let Ok(Ok(c)) = TextEpubContainer::try_open_with(zip, TextStyle::default()) else {
         panic!("not text epub")
     };
     eprintln!(

@@ -22,7 +22,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -76,7 +75,7 @@ fun GroupGrid(state: AppState, groups: List<PvGroup>, onOpen: (PvGroup) -> Unit)
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "${g.count} 冊",
+                    Tr.f("{1} 冊", g.count),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -115,18 +114,18 @@ fun AddToGroupDialog(state: AppState, bookIds: List<Long>, onClose: (added: Bool
     var name by remember { mutableStateOf("") }
     fun addTo(id: Long, label: String) {
         val ok = runCatching { state.core.addToGroup(id, bookIds) }.isSuccess
-        state.toast(if (ok) "${bookIds.size} 冊を「$label」に追加しました" else "グループに追加できませんでした")
+        state.toast(if (ok) Tr.f("{1} 冊を「{2}」に追加しました", bookIds.size, label) else "グループに追加できませんでした")
         state.bumpShelf()
         onClose(ok)
     }
     AlertDialog(
         onDismissRequest = { onClose(false) },
-        title = { Text("グループに追加（${bookIds.size} 冊）") },
+        title = { Text(Tr.f("グループに追加（{1} 冊）", bookIds.size)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 groups.forEach { g ->
                     TextButton(onClick = { addTo(g.id, g.name) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("📚 ${g.name}（${g.count} 冊）", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("📚 ${g.name}（${Tr.f("{1} 冊", g.count)}）", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 OutlinedTextField(
@@ -175,7 +174,7 @@ fun DeleteGroupDialog(state: AppState, g: PvGroup, onClose: () -> Unit) {
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text("グループを解除") },
-        text = { Text("「${g.name}」をやめます。中の本はライブラリに残ります。") },
+        text = { Text(Tr.f("「{1}」をやめます。中の本はライブラリに残ります。", g.name)) },
         confirmButton = {
             TextButton(onClick = {
                 runCatching { state.core.deleteGroup(g.id) }
@@ -196,7 +195,7 @@ fun GroupHeader(state: AppState, g: PvGroup) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         TextButton(onClick = { state.shelfGroup = null; state.shelfScrollToTop = true }) { Text("← グループ") }
         Text("📚 ${g.name}", maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        TextButton(onClick = { renaming = true }) { Text("名前") }
+        TextButton(onClick = { renaming = true }) { Text("名前を変更") }
         TextButton(onClick = { deleting = true }) { Text("解除") }
     }
     if (renaming) RenameGroupDialog(state, g, onClose = { renaming = false })

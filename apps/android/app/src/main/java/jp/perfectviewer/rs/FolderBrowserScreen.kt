@@ -23,7 +23,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -125,7 +124,7 @@ fun FolderBrowserScreen(state: AppState) {
                 when {
                     files == null -> "読み込み中…"
                     !dir.canRead() -> "このフォルダは読めません"
-                    else -> "このフォルダの画像: ${images} 枚。画像は 1 冊に、EPUB などの書庫は 1 ファイルごとに 1 冊として、サブフォルダも含めて本棚に追加します"
+                    else -> Tr.f("このフォルダの画像: {1} 枚。画像は 1 冊に、EPUB などの書庫は 1 ファイルごとに 1 冊として、サブフォルダも含めて本棚に追加します", images)
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -152,7 +151,7 @@ fun FolderBrowserScreen(state: AppState) {
                         Column(Modifier.weight(1f)) {
                             Text(sub.file.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             count?.takeIf { it > 0 }?.let {
-                                Text("画像 $it 枚", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                Text(Tr.f("画像 {1} 枚", it), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             }
                         }
                         TextButton(

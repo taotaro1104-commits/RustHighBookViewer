@@ -11,6 +11,7 @@ use crate::folder::FolderContainer;
 use crate::rar::RarProvider;
 use crate::sevenz::SevenZProvider;
 use crate::source::{FileSource, Source};
+use crate::text_style::TextStyle;
 use crate::zip_container::ZipProvider;
 
 pub trait Container: Send + Sync {
@@ -108,7 +109,20 @@ pub fn open_source_with(
     scratch: &Path,
     guard: &ExtractGuard,
 ) -> Result<Arc<dyn Container>> {
-    let zip = ZipProvider::default();
+    open_source_styled(src, scratch, guard, TextStyle::default())
+}
+
+/// `open_source_with` に加えて、文章の EPUB の見た目（文字の大きさ・書体）を指定する。
+pub fn open_source_styled(
+    src: Arc<dyn Source>,
+    scratch: &Path,
+    guard: &ExtractGuard,
+    text_style: TextStyle,
+) -> Result<Arc<dyn Container>> {
+    let zip = ZipProvider {
+        text_style,
+        ..ZipProvider::default()
+    };
     // 7z / RAR は端末の保存領域へ展開するため、ZIP（読み出し時に展開）より厳しい合計上限にする
     let limits = Limits {
         max_total_size: EXTRACT_TOTAL_LIMIT,

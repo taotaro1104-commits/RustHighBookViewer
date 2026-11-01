@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.nio.ByteBuffer
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -33,6 +34,7 @@ import uniffi.pv_ffi.PvCore
 import uniffi.pv_ffi.PvGroup
 import uniffi.pv_ffi.PvException
 import uniffi.pv_ffi.PvReader
+import uniffi.pv_ffi.PvTextStyle
 import uniffi.pv_ffi.PvSort
 
 private const val DESTROY_DELAY_MS = 600L
@@ -43,6 +45,7 @@ private const val KEY_VOLUME_KEYS = "volume_keys"
 private const val KEY_KEEP_SCREEN = "keep_screen"
 private const val KEY_SHELF_SORT = "shelf_sort"
 private const val KEY_SHELF_LIST = "shelf_list"
+private const val KEY_LANGUAGE = "language"
 
 /** アプリ全体の状態。画面回転では Activity を作り直さない（Manifest の configChanges）ので単純な保持で足りる。 */
 class AppState private constructor(private val context: Context) {
@@ -50,7 +53,9 @@ class AppState private constructor(private val context: Context) {
      * 初回アクセス時に作る。SQLite を開き、前回異常終了で残った展開物を掃除するため重いので、
      * Main スレッドの Activity 生成では作らない（最初に触るのは本棚の読み込み = IO スレッド）。
      */
-    val core: PvCore by lazy { PvCore(context.filesDir.resolve("pv").absolutePath) }
+    val core: PvCore by lazy {
+        PvCore(context.filesDir.resolve("pv").absolutePath).also { it.setLanguage(Tr.lang.code) }
+    }
 
     /** 開いている本。null なら本棚を表示する */
     var reader: PvReader? by mutableStateOf(null)
@@ -110,6 +115,21 @@ class AppState private constructor(private val context: Context) {
     /** 次に一覧が出たとき、先頭へ戻すか（タブやグループを切り替えたとき） */
     var shelfScrollToTop by mutableStateOf(false)
 
+    /** 画面の言語の設定（"" = 端末の言語に従う / "ja" / "en" / "zh" / "ko" / "es"） */
+    var language by mutableStateOf(prefs.getString(KEY_LANGUAGE, LANGUAGE_AUTO) ?: LANGUAGE_AUTO)
+        private set
+
+    init {
+        Tr.apply(language)
+    }
+
+    fun updateLanguage(setting: String) {
+        language = setting
+        prefs.edit().putString(KEY_LANGUAGE, setting).apply()
+        Tr.apply(setting)
+        core.setLanguage(Tr.lang.code) // Rust 側のエラーメッセージの言語も合わせる
+    }
+
     /** 本の一覧を、サムネイルではなく「ファイル・フォルダ名の一覧」で見せるか */
     var shelfAsList by mutableStateOf(prefs.getBoolean(KEY_SHELF_LIST, false))
         private set
@@ -158,9 +178,9 @@ class AppState private constructor(private val context: Context) {
     var volumeHandler: ((Boolean) -> Boolean)? = null
 
     fun contentResolverOutput(uri: Uri): java.io.OutputStream =
-        context.contentResolver.openOutputStream(uri) ?: error("保存先を開けません")
+        context.contentResolver.openOutputStream(uri) ?: error(Tr.t("保存先を開けません"))
 
-    fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    fun toast(msg: String) = Toast.makeText(context, Tr.t(msg), Toast.LENGTH_SHORT).show()
 
     /** 「すべてのファイルへのアクセス」が許可されているか（Android 11 以上。未満は標準の選択画面で足りる）。 */
     fun hasAllFilesAccess(): Boolean =
@@ -176,7 +196,7 @@ class AppState private constructor(private val context: Context) {
             core.openTree(SafTree(context, uri), uri.toString(), SafTree.displayName(context, uri))
         } else {
             val pfd = context.contentResolver.openFileDescriptor(uri, "r")
-                ?: error("ファイルを開けません")
+                ?: error(Tr.t("ファイルを開けません"))
             core.openFd(pfd.detachFd(), uri.toString(), displayName(uri))
         }
     }
@@ -214,7 +234,7 @@ class AppState private constructor(private val context: Context) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            toast("開けませんでした: ${userMessage(e)}")
+            toast(Tr.f("開けませんでした: {1}", userMessage(e)))
         } finally {
             busy = false
             importProgress = null
@@ -251,13 +271,16 @@ class AppState private constructor(private val context: Context) {
             runCatching {
                 val g = core.createGroup(groupName)
                 core.addToGroup(g.id, books.map { it.id })
-                grouped = "（グループ「${g.name}」）"
+                grouped = Tr.f("（グループ「{1}」）", g.name)
             }
         }
         close() // 閲覧中なら閉じて本棚へ
         shelfVersion++
-        val tail = if (failed.get() > 0) "（読めなかった ${failed.get()} 件は除く）" else ""
-        toast(if (cancelRequested) "${books.size} 冊を追加して中止しました" else "${books.size} 冊を本棚に追加しました$grouped$tail")
+        val tail = if (failed.get() > 0) Tr.f("（読めなかった {1} 件は除く）", failed.get()) else ""
+        toast(
+            if (cancelRequested) Tr.f("{1} 冊を追加して中止しました", books.size)
+            else Tr.f("{1} 冊を本棚に追加しました", books.size) + grouped + tail,
+        )
     }
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -265,6 +288,27 @@ class AppState private constructor(private val context: Context) {
     /** 本棚に保存された識別子から開き直す。`file://` はパスで、それ以外は content:// として開く。 */
     suspend fun openBook(uri: String) {
         if (uri.startsWith(FILE_PREFIX)) openLocalPath(uri.removePrefix(FILE_PREFIX)) else open(Uri.parse(uri))
+    }
+
+    /** 次に開き終えた本に対する後処理（位置の引き継ぎなど）。一度使うと消える */
+    private var afterOpen: ((PvReader) -> Unit)? = null
+
+    /**
+     * 文章の本の文字の大きさ・書体を変えて、開き直す。ページの区切りが変わるので、今のページは
+     * 本全体に対する位置の割合で引き継ぐ。
+     */
+    suspend fun applyTextStyle(current: PvReader, style: PvTextStyle) {
+        if (busy) return
+        val uri = current.uri()
+        val last = (current.pageCount().toInt() - 1).coerceAtLeast(1)
+        val fraction = current.currentPage().toFloat() / last
+        withContext(Dispatchers.IO) { core.setTextStyle(style) }
+        toast("文字の設定を適用中…")
+        afterOpen = { r ->
+            r.goToPage(((r.pageCount().toInt() - 1).coerceAtLeast(0) * fraction).roundToInt().toUInt())
+        }
+        openBook(uri)
+        afterOpen = null
     }
 
     private suspend fun openWith(block: () -> PvReader) {
@@ -275,6 +319,8 @@ class AppState private constructor(private val context: Context) {
             val startedAt = System.nanoTime()
             val opened = withContext(Dispatchers.IO) { block() }
             Log.i("PV", "opened in ${(System.nanoTime() - startedAt) / 1_000_000} ms: ${opened.title()} (${opened.pageCount()} pages)")
+            afterOpen?.invoke(opened)
+            afterOpen = null
             val old = reader
             reader = opened
             old?.let { release(it) } // 閲覧中に別の本を開いた場合、旧 reader を残さない
@@ -283,7 +329,7 @@ class AppState private constructor(private val context: Context) {
         } catch (e: SecurityException) {
             toast("この本へのアクセス権がありません。もう一度選び直してください")
         } catch (e: Exception) {
-            toast(if (cancelRequested) "キャンセルしました" else "開けませんでした: ${userMessage(e)}")
+            toast(if (cancelRequested) "キャンセルしました" else Tr.f("開けませんでした: {1}", userMessage(e)))
         } finally {
             busy = false
         }

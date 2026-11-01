@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use pv_container::TextStyle;
 use pv_layout::{Direction, LayoutOptions, ViewMode};
 use pv_process::ColorAdjust;
 use pv_render::FitMode;
@@ -60,6 +61,8 @@ pub struct Settings {
     pub color: ColorAdjust,
     pub cache: CacheSettings,
     pub input: InputMap,
+    /// 文章の EPUB の文字の大きさ・書体
+    pub text: TextStyle,
 }
 
 impl Default for Settings {
@@ -71,6 +74,7 @@ impl Default for Settings {
             color: ColorAdjust::default(),
             cache: CacheSettings::default(),
             input: InputMap::default(),
+            text: TextStyle::default(),
         }
     }
 }

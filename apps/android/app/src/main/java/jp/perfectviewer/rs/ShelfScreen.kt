@@ -27,7 +27,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
@@ -107,7 +106,7 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
                 // 大きな 7z / RAR は展開に時間がかかるため、途中でやめられるようにする
                 val prog = state.importProgress
                 Button(onClick = { state.cancelOpen() }) {
-                    Text(if (prog != null) "登録中 ${prog.first}/${prog.second}… キャンセル" else "読み込み中… キャンセル")
+                    Text(if (prog != null) Tr.f("登録中 {1}/{2}… キャンセル", prog.first, prog.second) else "読み込み中… キャンセル")
                 }
             } else {
                 Button(onClick = onPickFile) { Text("ファイル") }
@@ -128,7 +127,7 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
         }
         if (selecting) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${selected.size} 冊を選択中", modifier = Modifier.weight(1f))
+                Text(Tr.f("{1} 冊を選択中", selected.size), modifier = Modifier.weight(1f))
                 Button(enabled = selected.isNotEmpty(), onClick = { addTarget = selected.toList() }) { Text("グループに追加") }
                 TextButton(onClick = { stopSelecting() }) { Text("やめる") }
             }
@@ -266,8 +265,8 @@ private fun BookRow(
 
 private fun statusLabel(s: PvStatus) = when (s) {
     PvStatus.UNREAD -> ""
-    PvStatus.READING -> " 読書中"
-    PvStatus.FINISHED -> " 読了"
+    PvStatus.READING -> Tr.t(" 読書中")
+    PvStatus.FINISHED -> Tr.t(" 読了")
 }
 
 /** ファイル・フォルダ名。ファイルは拡張子付きで出す。取れないとき（SAF など）は題名。 */

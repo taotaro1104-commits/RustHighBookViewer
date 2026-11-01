@@ -14,21 +14,25 @@ mod sevenz;
 mod source;
 mod text_epub;
 mod text_layout;
+mod text_style;
+mod text_vertical;
 mod zip_container;
 
 pub use container::{
-    open_path, open_source, open_source_in, open_source_with, Container, ContainerProvider, Limits,
-    Probe,
+    open_path, open_source, open_source_in, open_source_styled, open_source_with, Container,
+    ContainerProvider, Limits, Probe,
 };
 pub use entry::{kind_from_path, natural_cmp, EntryId, EntryKind, EntryMeta};
 pub use epub::EpubContainer;
 pub use error::{ContainerError, Result};
 pub use extract::{ExtractGuard, ExtractedContainer, Extractor};
 pub use folder::FolderContainer;
+pub use font::has_typeface;
 pub use path::{decode_name, normalize_path};
 pub use rar::RarProvider;
 pub use scan::{scan_books, ScanItem, ScanKind};
 pub use sevenz::SevenZProvider;
 pub use source::{FileSource, MemorySource, Source, SourceReader};
 pub use text_epub::TextEpubContainer;
+pub use text_style::{TextStyle, Typeface, DEFAULT_FONT_PX, MAX_FONT_PX, MIN_FONT_PX};
 pub use zip_container::{open_nested, ZipContainer, ZipProvider};

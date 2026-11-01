@@ -11,6 +11,12 @@ use pv_library::{now_ms, Library};
 
 use crate::types::*;
 
+/// `PvReader::new` に渡す、本の素性。
+pub(crate) struct ReaderInfo {
+    pub uri: String,
+    pub is_text: bool,
+}
+
 #[derive(uniffi::Object)]
 pub struct PvReader {
     session: Mutex<BookSession>,
@@ -22,6 +28,10 @@ pub struct PvReader {
     library: Arc<Library>,
     book_id: i64,
     title: String,
+    /// 本棚から開き直すための識別子
+    uri: String,
+    /// 文章を描いたページでできた本か（文字の大きさ・書体を変えられる）
+    is_text: bool,
     saved_page: Mutex<Option<usize>>,
     /// ページ寸法を DB に保存済みか（単ページ表示で開いた本を、あとで見開きにしたときに保存する）
     sizes_saved: AtomicBool,
@@ -36,6 +46,7 @@ impl PvReader {
         book_id: i64,
         title: String,
         sizes_saved: bool,
+        info: ReaderInfo,
     ) -> Self {
         let rx = session.events();
         let thumbs = session.thumbnailer();
@@ -54,6 +65,8 @@ impl PvReader {
             library,
             book_id,
             title,
+            uri: info.uri,
+            is_text: info.is_text,
             saved_page: Mutex::new(None),
             sizes_saved: AtomicBool::new(sizes_saved),
             thumbs,
@@ -119,6 +132,16 @@ impl PvReader {
 
     pub fn title(&self) -> String {
         self.title.clone()
+    }
+
+    /// 本棚に登録した識別子（開き直すときに使う）。
+    pub fn uri(&self) -> String {
+        self.uri.clone()
+    }
+
+    /// 文章の本か。
+    pub fn is_text(&self) -> bool {
+        self.is_text
     }
 
     pub fn page_count(&self) -> u32 {

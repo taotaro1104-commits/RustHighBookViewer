@@ -627,3 +627,69 @@ fn groups_collect_books_and_survive_their_removal() {
         2
     );
 }
+
+/// 文字の大きさ・書体を変えると、開き直した本のページ数が変わる。設定は保存され、範囲外の値は収める。
+#[test]
+fn text_style_changes_pages_after_reopen_and_persists() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("小説.epub");
+    {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        let mut add = |name: &str, body: String| {
+            z.start_file(name, opts).unwrap();
+            z.write_all(body.as_bytes()).unwrap();
+        };
+        add(
+            "META-INF/container.xml",
+            r#"<container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>"#.into(),
+        );
+        add(
+            "c.opf",
+            r#"<package><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/></spine></package>"#.into(),
+        );
+        add(
+            "a.xhtml",
+            format!(
+                "<html><body><p>{}</p></body></html>",
+                "これは本文です。".repeat(600)
+            ),
+        );
+        z.finish().unwrap();
+    }
+    let data = dir.path().join("data").to_string_lossy().into_owned();
+    let core = PvCore::new(data.clone()).unwrap();
+    assert_eq!(core.text_style().size, 44);
+    let p = path.to_string_lossy().into_owned();
+    let pages = |core: &Arc<PvCore>| match core.clone().open_path(p.clone()) {
+        Ok(r) => Some((r.page_count(), r.is_text(), r.uri())),
+        Err(PvError::Failed { msg }) => {
+            assert!(msg.contains("フォント"), "{msg}");
+            None
+        }
+    };
+    let Some((normal, is_text, uri)) = pages(&core) else {
+        return;
+    };
+    assert!(is_text);
+    assert_eq!(uri, p);
+
+    core.set_text_style(PvTextStyle {
+        size: 64,
+        typeface: PvTypeface::Gothic,
+    })
+    .unwrap();
+    let (large, _, _) = pages(&core).unwrap();
+    assert!(large > normal, "{large} > {normal}");
+
+    // 範囲外は収める。再起動しても保存されている
+    core.set_text_style(PvTextStyle {
+        size: 10_000,
+        typeface: PvTypeface::Mincho,
+    })
+    .unwrap();
+    let saved = PvCore::new(data).unwrap().text_style();
+    assert_eq!(saved.size, pv_container::MAX_FONT_PX);
+    assert_eq!(saved.typeface, PvTypeface::Mincho);
+    assert!(core.available_typefaces().contains(&PvTypeface::Gothic));
+}

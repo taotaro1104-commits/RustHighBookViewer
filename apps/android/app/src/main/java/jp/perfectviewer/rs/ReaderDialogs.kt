@@ -28,7 +28,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -91,7 +90,7 @@ fun PageJumpDialog(
                         items(bookmarks, key = { it }) { p ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 TextButton(onClick = { onJump(p) }, modifier = Modifier.weight(1f)) {
-                                    Text("★ ${p + 1} ページ")
+                                    Text(Tr.f("★ {1} ページ", p + 1))
                                 }
                                 TextButton(onClick = { onRemoveBookmark(p) }) { Text("外す") }
                             }
@@ -167,7 +166,7 @@ fun PageGridDialog(reader: PvReader, currentPage: Int, onPick: (Int) -> Unit, on
         Surface(Modifier.fillMaxSize(), color = Color(0xF2000000)) {
             Column {
                 Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("ページ一覧  ${currentPage + 1}/$total", Modifier.weight(1f).padding(start = 8.dp), color = Color.White)
+                    Text(Tr.f("ページ一覧  {1}/{2}", currentPage + 1, total), Modifier.weight(1f).padding(start = 8.dp), color = Color.White)
                     TextButton(onClick = onDismiss) { Text("閉じる") }
                 }
                 LazyVerticalGrid(

@@ -24,7 +24,7 @@ class SafTree(private val context: Context, private val treeUri: Uri) : PvTree {
         try {
             walk(DocumentsContract.getTreeDocumentId(treeUri), "", 0, found)
         } catch (e: Exception) {
-            throw PvException.Failed("フォルダを読めません: ${e.message}")
+            throw PvException.Failed(Tr.f("フォルダを読めません: {1}", e.message))
         }
         docs = found
         Log.i("PV", "tree listed ${found.size} files in ${(System.nanoTime() - t0) / 1_000_000} ms")
@@ -32,15 +32,15 @@ class SafTree(private val context: Context, private val treeUri: Uri) : PvTree {
     }
 
     override fun openFd(index: UInt): Int {
-        val doc = docs.getOrNull(index.toInt()) ?: throw PvException.Failed("存在しないファイル: $index")
+        val doc = docs.getOrNull(index.toInt()) ?: throw PvException.Failed(Tr.f("存在しないファイル: {1}", index))
         try {
             val pfd = context.contentResolver.openFileDescriptor(doc.uri, "r")
-                ?: throw PvException.Failed("開けません: ${doc.path}")
+                ?: throw PvException.Failed(Tr.f("開けません: {1}", doc.path))
             return pfd.detachFd() // 所有権は Rust へ移る
         } catch (e: PvException) {
             throw e
         } catch (e: Exception) {
-            throw PvException.Failed("開けません: ${doc.path} (${e.message})")
+            throw PvException.Failed(Tr.f("開けません: {1} ({2})", doc.path, e.message))
         }
     }
 
@@ -57,7 +57,7 @@ class SafTree(private val context: Context, private val treeUri: Uri) : PvTree {
         context.contentResolver.query(children, cols, null, null, null)?.use { c ->
             while (c.moveToNext()) {
                 // 黙って切り詰めるとページ欠けや本の識別子の変化に気付けないので、エラーにする
-                if (out.size >= MAX_FILES) throw PvException.Failed("ファイルが多すぎます（上限 $MAX_FILES）")
+                if (out.size >= MAX_FILES) throw PvException.Failed(Tr.f("ファイルが多すぎます（上限 {1}）", MAX_FILES))
                 val id = c.getString(0)
                 val name = c.getString(1) ?: continue
                 val path = prefix + name

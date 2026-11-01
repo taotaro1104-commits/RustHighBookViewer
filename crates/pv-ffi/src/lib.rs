@@ -2,6 +2,7 @@
 
 mod core;
 mod fd;
+mod i18n;
 mod reader;
 mod tree;
 mod types;

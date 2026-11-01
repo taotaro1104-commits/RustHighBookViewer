@@ -18,10 +18,12 @@ pub enum Block {
 }
 
 /// ページ内の 1 行
+///
+/// 横書きでは `x` が行頭、`y` が行の上端。縦書きでは `x` が行（列）の中心、`y` が最初の文字の上端で、
+/// 文字は `size` ずつ下へ並ぶ。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line {
     pub x: f32,
-    /// 行の上端
     pub y: f32,
     pub size: f32,
     pub text: String,
@@ -41,6 +43,8 @@ pub struct PageSpec {
     pub margin_top: f32,
     pub margin_bottom: f32,
     pub font_px: f32,
+    /// 縦書き（上から下へ文字を並べ、行は右から左へ進む）
+    pub vertical: bool,
 }
 
 impl Default for PageSpec {
@@ -52,6 +56,7 @@ impl Default for PageSpec {
             margin_top: 120.0,
             margin_bottom: 140.0,
             font_px: 44.0,
+            vertical: true,
         }
     }
 }
@@ -64,6 +69,8 @@ const NO_END: &str = "（「『【〔〈《〖‘“([{";
 const NO_INDENT: &str = "「『（【〈《“‘　 ";
 
 const LINE_GAP: f32 = 1.75;
+/// 縦書きの行送り（横書きより少し詰める）
+const LINE_GAP_V: f32 = 1.6;
 const MAX_PAGES: usize = 20_000;
 
 fn decode_entities(s: &str) -> String {
@@ -261,11 +268,12 @@ fn heading_scale(level: u8) -> f32 {
     }
 }
 
+/// ページを埋めていく。`used` は、行を重ねていく向き（横書きは下へ、縦書きは左へ）に使った長さ。
 struct Pager<'a> {
     spec: PageSpec,
     pages: &'a mut Vec<Page>,
     cur: Page,
-    y: f32,
+    used: f32,
 }
 
 impl Pager<'_> {
@@ -273,37 +281,72 @@ impl Pager<'_> {
         self.cur.lines.is_empty()
     }
 
+    /// 行を重ねられる長さ
+    fn stack_extent(&self) -> f32 {
+        if self.spec.vertical {
+            self.spec.width - self.spec.margin_x * 2.0
+        } else {
+            self.spec.height - self.spec.margin_top - self.spec.margin_bottom
+        }
+    }
+
+    /// 1 行に並べられる長さ
+    fn line_extent(&self) -> f32 {
+        if self.spec.vertical {
+            self.spec.height - self.spec.margin_top - self.spec.margin_bottom
+        } else {
+            self.spec.width - self.spec.margin_x * 2.0
+        }
+    }
+
     fn new_page(&mut self) {
         if !self.cur.lines.is_empty() && self.pages.len() < MAX_PAGES {
             self.pages.push(std::mem::take(&mut self.cur));
         }
         self.cur = Page::default();
-        self.y = self.spec.margin_top;
+        self.used = 0.0;
     }
 
-    fn put(&mut self, x: f32, size: f32, pitch: f32, text: String) {
-        if self.y + pitch > self.spec.height - self.spec.margin_bottom && !self.at_top() {
+    /// 行を 1 本置く。`indent` は行頭の字下げ（行の向きに沿った長さ）。
+    fn put(&mut self, size: f32, pitch: f32, indent: f32, text: String) {
+        if self.used + pitch > self.stack_extent() && !self.at_top() {
             self.new_page();
         }
-        self.cur.lines.push(Line {
-            x,
-            y: self.y,
-            size,
-            text,
-        });
-        self.y += pitch;
+        let (x, y) = if self.spec.vertical {
+            (
+                self.spec.width - self.spec.margin_x - self.used - pitch / 2.0,
+                self.spec.margin_top + indent,
+            )
+        } else {
+            (
+                self.spec.margin_x + indent,
+                self.spec.margin_top + self.used,
+            )
+        };
+        self.cur.lines.push(Line { x, y, size, text });
+        self.used += pitch;
     }
+}
+
+/// 縦書きでは、どの文字も 1 マス（`size`）を占める。
+fn cell(_c: char, size: f32) -> f32 {
+    size
 }
 
 /// 章ごとのブロックを、ページに割り付ける。章の初めは必ず新しいページから始める。
 pub fn paginate(chapters: &[Vec<Block>], spec: PageSpec, adv: Advance) -> Vec<Page> {
     let mut pages = Vec::new();
-    let text_w = spec.width - spec.margin_x * 2.0;
     let mut pg = Pager {
         spec,
         pages: &mut pages,
         cur: Page::default(),
-        y: spec.margin_top,
+        used: 0.0,
+    };
+    let line_len = pg.line_extent();
+    let (gap, metric): (f32, Advance) = if spec.vertical {
+        (LINE_GAP_V, &cell)
+    } else {
+        (LINE_GAP, adv)
     };
     for blocks in chapters {
         pg.new_page();
@@ -311,26 +354,26 @@ pub fn paginate(chapters: &[Vec<Block>], spec: PageSpec, adv: Advance) -> Vec<Pa
             match b {
                 Block::Blank => {
                     if !pg.at_top() {
-                        pg.y += spec.font_px * LINE_GAP * 0.6;
+                        pg.used += spec.font_px * gap * 0.6;
                     }
                 }
                 Block::Heading(level, text) => {
                     let size = spec.font_px * heading_scale(*level);
-                    let pitch = size * 1.5;
+                    let pitch = size * (gap - 0.25);
                     if !pg.at_top() {
-                        pg.y += pitch * 0.6;
+                        pg.used += pitch * 0.6;
                     }
-                    for (_, line) in wrap(text, 0.0, text_w, size, adv) {
-                        pg.put(spec.margin_x, size, pitch, line);
+                    for (_, line) in wrap(text, 0.0, line_len, size, metric) {
+                        pg.put(size, pitch, 0.0, line);
                     }
-                    pg.y += pitch * 0.3;
+                    pg.used += pitch * 0.3;
                 }
                 Block::Para { text, indent } => {
                     let size = spec.font_px;
-                    let pitch = size * LINE_GAP;
+                    let pitch = size * gap;
                     let first = if *indent { size } else { 0.0 };
-                    for (ind, line) in wrap(text, first, text_w, size, adv) {
-                        pg.put(spec.margin_x + ind, size, pitch, line);
+                    for (ind, line) in wrap(text, first, line_len, size, metric) {
+                        pg.put(size, pitch, ind, line);
                     }
                 }
             }
@@ -432,6 +475,7 @@ mod tests {
             margin_top: 20.0,
             margin_bottom: 20.0,
             font_px: 20.0,
+            vertical: false,
         };
         let long: Vec<Block> = (0..30)
             .map(|i| Block::Para {
@@ -453,5 +497,47 @@ mod tests {
             }
         }
         assert!(paginate(&[vec![]], spec, &adv).is_empty());
+    }
+
+    #[test]
+    fn vertical_columns_run_right_to_left_and_cells_fill_the_height() {
+        // 高さ 200・余白 20 → 1 列に 8 マス（20px）。幅 200・余白 20 → 160px / 32px(行送り) = 5 列
+        let spec = PageSpec {
+            width: 200.0,
+            height: 200.0,
+            margin_x: 20.0,
+            margin_top: 20.0,
+            margin_bottom: 20.0,
+            font_px: 20.0,
+            vertical: true,
+        };
+        let text = "あいうえおかきくけこさしすせそ".to_owned(); // 15 字、先頭は 1 マス字下げ
+        let pages = paginate(&[vec![Block::Para { text, indent: true }]], spec, &adv);
+        assert_eq!(pages.len(), 1);
+        let cols = &pages[0].lines;
+        assert_eq!(cols.len(), 2);
+        // 1 列目: 字下げ 1 マス + 7 字。2 列目はそのあと
+        assert_eq!(cols[0].text.chars().count(), 7);
+        assert_eq!(cols[0].y, spec.margin_top + 20.0);
+        assert_eq!(cols[1].y, spec.margin_top);
+        // 右端から始まり、次の列は左へ
+        assert_eq!(cols[0].x, 200.0 - 20.0 - 16.0);
+        assert!(cols[1].x < cols[0].x);
+        // 列は左右の余白を越えない
+        let many = vec![Block::Para {
+            text: "あ".repeat(8 * 30),
+            indent: false,
+        }];
+        for p in paginate(&[many], spec, &adv) {
+            assert!(p.lines.len() <= 5, "{}", p.lines.len());
+            for l in &p.lines {
+                assert!(
+                    l.x - 16.0 >= spec.margin_x - 0.01
+                        && l.x + 16.0 <= spec.width - spec.margin_x + 0.01,
+                    "{l:?}"
+                );
+                assert!(l.text.chars().count() <= 8);
+            }
+        }
     }
 }

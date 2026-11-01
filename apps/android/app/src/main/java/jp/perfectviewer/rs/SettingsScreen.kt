@@ -20,7 +20,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,7 +51,7 @@ fun SettingsScreen(state: AppState) {
         s = next
         scope.launch(Dispatchers.IO) {
             runCatching { state.core.setSettings(next) }
-                .onFailure { e -> withContext(Dispatchers.Main) { state.toast("設定を保存できません: ${e.message}") } }
+                .onFailure { e -> withContext(Dispatchers.Main) { state.toast(Tr.f("設定を保存できません: {1}", e.message)) } }
         }
     }
 
@@ -71,6 +70,13 @@ fun SettingsScreen(state: AppState) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = { state.showSettings = false }) { Text("← 戻る") }
             Text("設定", style = MaterialTheme.typography.headlineSmall)
+        }
+
+        Section("言語 / Language") {
+            Choice(
+                "言語 / Language", state.language,
+                listOf(LANGUAGE_AUTO to "端末の言語") + Lang.entries.map { it.code to it.nativeName },
+            ) { state.updateLanguage(it) }
         }
 
         Section("表示（これから開く本の既定）") {
@@ -117,11 +123,11 @@ fun SettingsScreen(state: AppState) {
             ) { update(s.copy(cacheMb = it.toUInt())) }
             Choice(
                 "先読み（次のページ側）", s.prefetchForward.toInt(),
-                listOf(0, 1, 2, 4, 6, 8).map { it to "${it}枚" },
+                listOf(0, 1, 2, 4, 6, 8).map { it to Tr.f("{1}枚", it) },
             ) { update(s.copy(prefetchForward = it.toUInt())) }
             Choice(
                 "先読み（前のページ側）", s.prefetchBack.toInt(),
-                listOf(0, 1, 2, 4).map { it to "${it}枚" },
+                listOf(0, 1, 2, 4).map { it to Tr.f("{1}枚", it) },
             ) { update(s.copy(prefetchBack = it.toUInt())) }
         }
 
@@ -132,7 +138,7 @@ fun SettingsScreen(state: AppState) {
 
         Section("このアプリについて") {
             Text("RustHighBookViewer ${state.versionName}", style = MaterialTheme.typography.bodyLarge)
-            Note("対応形式: ZIP / CBZ、7z、RAR、EPUB（画像主体のもの）、画像フォルダ。MIT License。RAR の展開には UnRAR を使用しています。")
+            Note("対応形式: ZIP / CBZ、7z、RAR、EPUB（画像・文章）、画像フォルダ。MIT License。RAR の展開には UnRAR を使用しています。")
         }
     }
     }
@@ -147,7 +153,7 @@ fun SettingsScreen(state: AppState) {
                     confirmReset = false
                     scope.launch(Dispatchers.IO) {
                         val msg = runCatching { state.core.resetBookSettings() }
-                            .fold({ "初期化しました" }, { "初期化できません: ${it.message}" })
+                            .fold({ "初期化しました" }, { Tr.f("初期化できません: {1}", it.message) })
                         withContext(Dispatchers.Main) { state.toast(msg) }
                     }
                 }) { Text("初期化") }

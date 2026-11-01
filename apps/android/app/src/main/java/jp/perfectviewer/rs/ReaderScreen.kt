@@ -18,7 +18,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -78,6 +77,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
     var modeMenu by remember { mutableStateOf(false) }
     var showColor by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
+    var showText by remember { mutableStateOf(false) }
     var showJump by remember { mutableStateOf(false) }
     /** しおりのあるページ（0 始まり） */
     var bookmarks by remember { mutableStateOf(emptyList<Int>()) }
@@ -139,13 +139,13 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                     val p = reader.currentPage()
                     val text = if (reader.bookmarks().contains(p)) {
                         reader.removeBookmark(p)
-                        "しおりを外しました: ${p + 1u} ページ"
+                        Tr.f("しおりを外しました: {1} ページ", p + 1u)
                     } else {
-                        "しおりを追加: ${reader.addBookmark() + 1u} ページ"
+                        Tr.f("しおりを追加: {1} ページ", reader.addBookmark() + 1u)
                     }
                     bookmarks = reader.bookmarks().map { it.toInt() }
                     text
-                }.getOrElse { "しおりを操作できません: ${it.message}" }
+                }.getOrElse { Tr.f("しおりを操作できません: {1}", it.message) }
             }
             state.toast(msg)
         }
@@ -157,7 +157,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
             val msg = runCatching {
                 val bytes = reader.pageBytes(reader.currentPage())
                 state.contentResolverOutput(uri).use { it.write(bytes) }
-            }.fold({ "ページを保存しました" }, { "保存に失敗: ${it.message}" })
+            }.fold({ "ページを保存しました" }, { Tr.f("保存に失敗: {1}", it.message) })
             withContext(Dispatchers.Main) { state.toast(msg) }
         }
     }
@@ -219,7 +219,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                         is PvEvent.Failed -> if (ev.ticket == latestTicket) {
                             withContext(Dispatchers.Main) {
                                 pending = null
-                                state.toast("表示エラー: ${ev.message}")
+                                state.toast(Tr.f("表示エラー: {1}", ev.message))
                             }
                         }
                     }
@@ -299,6 +299,13 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
             },
         )
 
+        if (showText) {
+            TextStyleDialog(
+                state,
+                onApply = { st -> showText = false; scope.launch { state.applyTextStyle(reader, st) } },
+                onClose = { showText = false },
+            )
+        }
         if (showColor) {
             ColorDialog(
                 initial = reader.color(),
@@ -407,13 +414,14 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                     }
                     TextButton(onClick = { showJump = true }) { Text("ページ指定") }
                     TextButton(onClick = { showGrid = true }) { Text("一覧") }
+                    if (reader.isText()) TextButton(onClick = { showText = true }) { Text("文字") }
                     TextButton(onClick = { showColor = true }) { Text("色調整") }
                     FilterChip(selected = magnifier, onClick = { magnifier = !magnifier; if (magnifier) { uiVisible = false; state.toast("ルーペ: 押したままなぞって拡大。短くタップで終了") } }, label = { Text("ルーペ") })
                     Box {
-                        TextButton(onClick = { autoMenu = true }) { Text(if (autoSec > 0) "自動 ${autoSec}秒" else "自動めくり") }
+                        TextButton(onClick = { autoMenu = true }) { Text(if (autoSec > 0) Tr.f("自動 {1}秒", autoSec) else "自動めくり") }
                         DropdownMenu(expanded = autoMenu, onDismissRequest = { autoMenu = false }) {
                             listOf(0, 3, 5, 10, 20).forEach { sec ->
-                                DropdownMenuItem(text = { Text(if (sec == 0) "オフ" else "${sec}秒ごと") }, onClick = {
+                                DropdownMenuItem(text = { Text(if (sec == 0) "オフ" else Tr.f("{1}秒ごと", sec)) }, onClick = {
                                     autoMenu = false
                                     autoSec = sec
                                     if (sec > 0) uiVisible = false

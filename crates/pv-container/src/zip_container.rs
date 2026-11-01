@@ -11,6 +11,7 @@ use crate::error::{ContainerError, Result};
 use crate::path::{decode_name, normalize_path};
 use crate::source::{MemorySource, Source, SourceReader};
 use crate::text_epub::TextEpubContainer;
+use crate::text_style::TextStyle;
 
 /// ローカルファイルヘッダ / 空アーカイブの終端レコード
 const MAGICS: [&[u8; 4]; 2] = [b"PK\x03\x04", b"PK\x05\x06"];
@@ -18,6 +19,8 @@ const MAGICS: [&[u8; 4]; 2] = [b"PK\x03\x04", b"PK\x05\x06"];
 #[derive(Default)]
 pub struct ZipProvider {
     pub limits: Option<Limits>,
+    /// 文章の EPUB の見た目
+    pub text_style: TextStyle,
 }
 
 impl ContainerProvider for ZipProvider {
@@ -35,7 +38,7 @@ impl ContainerProvider for ZipProvider {
         Ok(match EpubContainer::from_zip(zip) {
             Ok(epub) => Arc::new(epub),
             // 画像の無い EPUB は、文章の本として読む（フォントが無ければエラー）
-            Err(zip) => match TextEpubContainer::try_open(zip)? {
+            Err(zip) => match TextEpubContainer::try_open_with(zip, self.text_style)? {
                 Ok(text) => Arc::new(text),
                 Err(zip) => Arc::new(zip),
             },

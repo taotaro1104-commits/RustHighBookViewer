@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.key
@@ -91,8 +90,9 @@ class MainActivity : ComponentActivity() {
                             title = { Text("フォルダを選ぶには") },
                             text = {
                                 Text(
-                                    "Android の標準のフォルダ選択では、Download や内部ストレージの最上位は「プライバシー保護のため使用できません」と表示され、選べません。\n\n" +
-                                        "「すべてのファイルへのアクセス」を許可すると、アプリ内の画面からどのフォルダでも選べます（読み込みも速くなります）。画像の閲覧以外には使いません。",
+                                    Tr.t("Android の標準のフォルダ選択では、Download や内部ストレージの最上位は「プライバシー保護のため使用できません」と表示され、選べません。") +
+                                        "\n\n" +
+                                        Tr.t("「すべてのファイルへのアクセス」を許可すると、アプリ内の画面からどのフォルダでも選べます（読み込みも速くなります）。画像の閲覧以外には使いません。"),
                                 )
                             },
                             confirmButton = {
