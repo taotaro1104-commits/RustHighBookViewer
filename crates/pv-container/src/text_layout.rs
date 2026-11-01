@@ -45,6 +45,8 @@ pub struct PageSpec {
     pub font_px: f32,
     /// 縦書き（上から下へ文字を並べ、行は右から左へ進む）
     pub vertical: bool,
+    /// 行の送り幅（文字の大きさに対する倍率）
+    pub line_gap: f32,
 }
 
 impl Default for PageSpec {
@@ -57,6 +59,7 @@ impl Default for PageSpec {
             margin_bottom: 140.0,
             font_px: 44.0,
             vertical: true,
+            line_gap: LINE_GAP_V,
         }
     }
 }
@@ -68,7 +71,6 @@ const NO_END: &str = "（「『【〔〈《〖‘“([{";
 /// 字下げしない書き出し（会話文など）
 const NO_INDENT: &str = "「『（【〈《“‘　 ";
 
-const LINE_GAP: f32 = 1.75;
 /// 縦書きの行送り（横書きより少し詰める）
 const LINE_GAP_V: f32 = 1.6;
 const MAX_PAGES: usize = 20_000;
@@ -343,11 +345,8 @@ pub fn paginate(chapters: &[Vec<Block>], spec: PageSpec, adv: Advance) -> Vec<Pa
         used: 0.0,
     };
     let line_len = pg.line_extent();
-    let (gap, metric): (f32, Advance) = if spec.vertical {
-        (LINE_GAP_V, &cell)
-    } else {
-        (LINE_GAP, adv)
-    };
+    let gap = spec.line_gap;
+    let metric: Advance = if spec.vertical { &cell } else { adv };
     for blocks in chapters {
         pg.new_page();
         for b in blocks {
@@ -476,6 +475,7 @@ mod tests {
             margin_bottom: 20.0,
             font_px: 20.0,
             vertical: false,
+            line_gap: 1.75,
         };
         let long: Vec<Block> = (0..30)
             .map(|i| Block::Para {
@@ -510,6 +510,7 @@ mod tests {
             margin_bottom: 20.0,
             font_px: 20.0,
             vertical: true,
+            line_gap: 1.6,
         };
         let text = "あいうえおかきくけこさしすせそ".to_owned(); // 15 字、先頭は 1 マス字下げ
         let pages = paginate(&[vec![Block::Para { text, indent: true }]], spec, &adv);
@@ -539,5 +540,28 @@ mod tests {
                 assert!(l.text.chars().count() <= 8);
             }
         }
+    }
+
+    #[test]
+    fn wider_line_spacing_makes_more_pages() {
+        let base = PageSpec::default();
+        let text: Vec<Block> = (0..40)
+            .map(|_| Block::Para {
+                text: "あ".repeat(60),
+                indent: false,
+            })
+            .collect();
+        let pages = |g: f32| {
+            paginate(
+                std::slice::from_ref(&text),
+                PageSpec {
+                    line_gap: g,
+                    ..base
+                },
+                &adv,
+            )
+            .len()
+        };
+        assert!(pages(1.2) < pages(1.6) && pages(1.6) < pages(2.4));
     }
 }

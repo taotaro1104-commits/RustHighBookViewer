@@ -202,6 +202,19 @@ internal val TRANSLATIONS: Map<String, List<String>> = buildMap {
     e("SD カード", "SD card", "SD 卡", "SD 카드", "Tarjeta SD")
 
     // --- 文字の設定（TextStyleDialog）
+    e("行間  {1}%", "Line spacing  {1}%", "行距  {1}%", "줄 간격  {1}%", "Interlineado  {1}%")
+    e("行間", "Line spacing", "行距", "줄 간격", "Interlineado")
+    e("狭く", "Tighter", "缩小", "좁게", "Menos")
+    e("広く", "Looser", "放大", "넓게", "Más")
+    e("文章の本（EPUB）", "Text books (EPUB)", "文字书籍（EPUB）", "문장 책 (EPUB)", "Libros de texto (EPUB)")
+    e(
+        "画像の無い文章の EPUB を、縦書きで表示するときの見た目です。変更は、次に本を開いたときから反映されます（開いている本は、閲覧メニューの「文字」で開き直せます）。",
+        "How text-only EPUBs are displayed in vertical writing. Changes apply the next time you open a book (an open book can be reloaded with “Text” in the reader menu).",
+        "没有图片的纯文字 EPUB 以竖排显示时的外观。更改将在下次打开书时生效（已打开的书可通过阅读菜单中的“文字”重新载入）。",
+        "이미지가 없는 문장 EPUB을 세로쓰기로 표시할 때의 모양입니다. 변경 사항은 다음에 책을 열 때부터 적용됩니다 (열려 있는 책은 열람 메뉴의 “글자”로 다시 열 수 있습니다).",
+        "Aspecto de los EPUB de solo texto en escritura vertical. Los cambios se aplican la próxima vez que abras un libro (un libro abierto se recarga con «Texto» en el menú del lector).",
+    )
+    e("文字の大きさ", "Text size", "文字大小", "글자 크기", "Tamaño del texto")
     e("ゴシック体", "Gothic", "黑体", "고딕체", "Gótica")
     e("明朝体", "Mincho (serif)", "宋体", "명조체", "Mincho (serifa)")
     e("文字の設定", "Text settings", "文字设置", "글자 설정", "Ajustes de texto")

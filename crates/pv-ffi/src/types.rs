@@ -300,6 +300,8 @@ pub struct PvTextStyle {
     /// 文字の大きさ（`TEXT_SIZE_MIN`〜`TEXT_SIZE_MAX`）
     pub size: u32,
     pub typeface: PvTypeface,
+    /// 行の送り幅（文字の大きさに対する割合、%。120〜240）
+    pub line_spacing: u32,
 }
 
 /// 本をまとめたグループ（シリーズ・フォルダ単位など）

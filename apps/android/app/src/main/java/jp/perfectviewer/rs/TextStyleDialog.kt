@@ -24,8 +24,11 @@ import uniffi.pv_ffi.PvTypeface
 private const val SIZE_MIN = 28f
 private const val SIZE_MAX = 80f
 private const val SIZE_STEP = 4f
+private const val SPACING_MIN = 120f
+private const val SPACING_MAX = 240f
+private const val SPACING_STEP = 10f
 
-private fun typefaceLabel(t: PvTypeface) = when (t) {
+internal fun typefaceLabel(t: PvTypeface) = when (t) {
     PvTypeface.GOTHIC -> "ゴシック体"
     PvTypeface.MINCHO -> "明朝体"
 }
@@ -40,6 +43,7 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
     val faces = remember { state.core.availableTypefaces() }
     var size by remember { mutableFloatStateOf(current.size.toFloat().coerceIn(SIZE_MIN, SIZE_MAX)) }
     var face by remember { mutableStateOf(current.typeface) }
+    var spacing by remember { mutableFloatStateOf(current.lineSpacing.toFloat().coerceIn(SPACING_MIN, SPACING_MAX)) }
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text("文字の設定") },
@@ -57,6 +61,18 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
                     )
                     TextButton(onClick = { size = (size + SIZE_STEP).coerceAtMost(SIZE_MAX) }) { Text("大きく") }
                 }
+                Text(Tr.f("行間  {1}%", spacing.roundToInt()))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { spacing = (spacing - SPACING_STEP).coerceAtLeast(SPACING_MIN) }) { Text("狭く") }
+                    Slider(
+                        value = spacing,
+                        onValueChange = { spacing = it },
+                        valueRange = SPACING_MIN..SPACING_MAX,
+                        steps = ((SPACING_MAX - SPACING_MIN) / SPACING_STEP).toInt() - 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { spacing = (spacing + SPACING_STEP).coerceAtMost(SPACING_MAX) }) { Text("広く") }
+                }
                 Text("書体")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     faces.forEach { t ->
@@ -67,7 +83,7 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
             }
         },
         confirmButton = {
-            TextButton(onClick = { onApply(PvTextStyle(size.roundToInt().toUInt(), face)) }) { Text("適用") }
+            TextButton(onClick = { onApply(PvTextStyle(size.roundToInt().toUInt(), face, spacing.roundToInt().toUInt())) }) { Text("適用") }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("やめる") } },
     )

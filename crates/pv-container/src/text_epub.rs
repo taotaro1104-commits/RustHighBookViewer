@@ -52,6 +52,7 @@ impl TextEpubContainer {
         let font = font_for(style.typeface).ok_or(ContainerError::NoFont)?;
         let spec = PageSpec {
             font_px: style.font_px as f32,
+            line_gap: style.line_spacing as f32 / 100.0,
             ..PageSpec::default()
         };
         let cache: RefCell<HashMap<(char, u32), f32>> = RefCell::new(HashMap::new());
@@ -358,6 +359,7 @@ mod tests {
             let style = TextStyle {
                 font_px: px,
                 typeface: face,
+                ..TextStyle::default()
             };
             let Ok(Ok(c)) = TextEpubContainer::try_open_with(novel(), style) else {
                 panic!("text epub should open");

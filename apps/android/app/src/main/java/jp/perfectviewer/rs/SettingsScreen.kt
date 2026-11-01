@@ -115,6 +115,28 @@ fun SettingsScreen(state: AppState) {
             ) { state.updateShelfSort(it) }
         }
 
+        Section("文章の本（EPUB）") {
+            Note("画像の無い文章の EPUB を、縦書きで表示するときの見た目です。変更は、次に本を開いたときから反映されます（開いている本は、閲覧メニューの「文字」で開き直せます）。")
+            var text by remember { mutableStateOf(state.core.textStyle()) }
+            val faces = remember { state.core.availableTypefaces() }
+            fun updateText(next: uniffi.pv_ffi.PvTextStyle) {
+                text = next
+                scope.launch(Dispatchers.IO) {
+                    runCatching { state.core.setTextStyle(next) }
+                        .onFailure { e -> withContext(Dispatchers.Main) { state.toast(Tr.f("設定を保存できません: {1}", e.message)) } }
+                }
+            }
+            Choice("書体", text.typeface, faces.map { it to typefaceLabel(it) }) { updateText(text.copy(typeface = it)) }
+            Choice(
+                "文字の大きさ", text.size.toInt(),
+                listOf(32, 36, 40, 44, 48, 56, 64).map { it to it.toString() },
+            ) { updateText(text.copy(size = it.toUInt())) }
+            Choice(
+                "行間", text.lineSpacing.toInt(),
+                listOf(130, 150, 160, 180, 200, 220).map { it to "$it%" },
+            ) { updateText(text.copy(lineSpacing = it.toUInt())) }
+        }
+
         Section("キャッシュ（メモリ）") {
             Note("変更は、次に本を開いたときから反映されます。")
             Choice(

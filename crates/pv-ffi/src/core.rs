@@ -115,6 +115,7 @@ impl PvCore {
         PvTextStyle {
             size: t.font_px,
             typeface: t.typeface.into(),
+            line_spacing: t.line_spacing,
         }
     }
 
@@ -126,6 +127,7 @@ impl PvCore {
         updated.text = pv_container::TextStyle {
             font_px: style.size,
             typeface: style.typeface.into(),
+            line_spacing: style.line_spacing,
         }
         .clamped();
         updated.save(&self.settings_path).map_err(PvError::new)?;

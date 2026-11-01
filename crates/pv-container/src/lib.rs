@@ -34,5 +34,8 @@ pub use scan::{scan_books, ScanItem, ScanKind};
 pub use sevenz::SevenZProvider;
 pub use source::{FileSource, MemorySource, Source, SourceReader};
 pub use text_epub::TextEpubContainer;
-pub use text_style::{TextStyle, Typeface, DEFAULT_FONT_PX, MAX_FONT_PX, MIN_FONT_PX};
+pub use text_style::{
+    TextStyle, Typeface, DEFAULT_FONT_PX, DEFAULT_LINE_SPACING, MAX_FONT_PX, MAX_LINE_SPACING,
+    MIN_FONT_PX, MIN_LINE_SPACING,
+};
 pub use zip_container::{open_nested, ZipContainer, ZipProvider};
