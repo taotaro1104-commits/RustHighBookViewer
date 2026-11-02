@@ -14,8 +14,8 @@ android {
         applicationId = "jp.perfectviewer.rs"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.7"
+        versionCode = 9
+        versionName = "0.1.8"
         // Rust 側でビルドする ABI と一致させる
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
