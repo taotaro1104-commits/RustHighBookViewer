@@ -88,18 +88,23 @@ fn plan(font: &FontVec, c: char) -> (char, Place) {
 pub fn draw_vertical(
     font: &FontVec,
     canvas: &mut Canvas,
-    cx: f32,
-    top: f32,
-    size: f32,
+    col: Column,
     text: &str,
     ink: u8,
+    look: Look,
 ) {
+    let Column {
+        cx,
+        top,
+        size,
+        pitch,
+    } = col;
     let scale = PxScale::from(size);
     let scaled = font.as_scaled(scale);
     // 枠（全角）の中心に字形の中心を合わせるための、ベースラインの位置
     let centre_offset = (scaled.ascent() + scaled.descent()) / 2.0;
     for (i, c) in text.chars().enumerate() {
-        let cy = top + (i as f32 + 0.5) * size;
+        let cy = top + (i as f32 + 0.5) * pitch;
         let (shown, place) = plan(font, c);
         let id = font.glyph_id(shown);
         let adv = scaled.h_advance(id);
@@ -107,30 +112,58 @@ pub fn draw_vertical(
             Place::Upright(dx, dy) => (dx * size, dy * size),
             Place::Rotated => (0.0, 0.0),
         };
-        let pen = point(cx - adv / 2.0 + dx, cy + centre_offset + dy);
-        let Some(outlined) = font.outline_glyph(id.with_scale_and_position(scale, pen)) else {
-            continue;
-        };
-        let b = outlined.px_bounds();
+        let base = point(cx - adv / 2.0 + dx, cy + centre_offset + dy);
         let rotated = matches!(place, Place::Rotated);
-        outlined.draw(|gx, gy, cov| {
-            let x = b.min.x as i64 + i64::from(gx);
-            let y = b.min.y as i64 + i64::from(gy);
-            if rotated {
-                // 枠の中心まわりに時計回りへ 90 度: 右 → 下、下 → 左
-                let du = x as f32 + 0.5 - cx;
-                let dv = y as f32 + 0.5 - cy;
-                canvas.blend(
-                    (cx - dv - 0.5).round() as i64,
-                    (cy + du - 0.5).round() as i64,
-                    cov,
-                    ink,
-                );
-            } else {
+        // 太字は、わずかにずらして重ね描きして太らせる（フォントに太字が無くても使える）
+        let thick = if look.bold { size * 0.035 } else { 0.0 };
+        let offsets: &[(f32, f32)] = if look.bold {
+            &[(0.0, 0.0), (thick, 0.0), (0.0, thick), (thick, thick)]
+        } else {
+            &[(0.0, 0.0)]
+        };
+        for &(ox, oy) in offsets {
+            let pen = point(base.x + ox, base.y + oy);
+            let Some(outlined) = font.outline_glyph(id.with_scale_and_position(scale, pen)) else {
+                continue;
+            };
+            let b = outlined.px_bounds();
+            outlined.draw(|gx, gy, cov| {
+                let mut x = b.min.x as i64 + i64::from(gx);
+                let mut y = b.min.y as i64 + i64::from(gy);
+                if rotated {
+                    // 枠の中心まわりに時計回りへ 90 度: 右 → 下、下 → 左
+                    let du = x as f32 + 0.5 - cx;
+                    let dv = y as f32 + 0.5 - cy;
+                    x = (cx - dv - 0.5).round() as i64;
+                    y = (cy + du - 0.5).round() as i64;
+                }
+                if look.italic {
+                    // 枠の中心を軸に、上ほど右へ傾ける（行ごとにずらすだけなので、欠けは出ない）
+                    x += ((cy - y as f32) * ITALIC_SLANT).round() as i64;
+                }
                 canvas.blend(x, y, cov, ink);
-            }
-        });
+            });
+        }
     }
+}
+
+/// 斜体の傾き（高さ 1 に対する横ずれ）
+const ITALIC_SLANT: f32 = 0.2;
+
+/// 縦書きの 1 列（中心の x、最初の文字の上端、文字の大きさ、文字を並べる間隔）
+#[derive(Debug, Clone, Copy)]
+pub struct Column {
+    pub cx: f32,
+    pub top: f32,
+    pub size: f32,
+    pub pitch: f32,
+}
+
+/// 字形の見た目
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Look {
+    pub bold: bool,
+    pub italic: bool,
 }
 
 #[cfg(test)]

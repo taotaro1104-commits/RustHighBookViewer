@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Slider
@@ -21,21 +23,41 @@ import kotlin.math.roundToInt
 import uniffi.pv_ffi.PvTextStyle
 import uniffi.pv_ffi.PvTypeface
 
-private const val SIZE_MIN = 28f
-private const val SIZE_MAX = 80f
+/** 文字の大きさ・行間・文字間の範囲（Rust 側の上限・下限と合わせる） */
+internal const val SIZE_MIN = 28f
+internal const val SIZE_MAX = 160f
 private const val SIZE_STEP = 4f
-private const val SPACING_MIN = 120f
-private const val SPACING_MAX = 240f
-private const val SPACING_STEP = 10f
+internal const val SPACING_MIN = 100f
+internal const val SPACING_MAX = 240f
+private const val SPACING_STEP = 5f
+internal const val LETTER_MIN = -10f
+internal const val LETTER_MAX = 60f
+private const val LETTER_STEP = 5f
 
 internal fun typefaceLabel(t: PvTypeface) = when (t) {
     PvTypeface.GOTHIC -> "ゴシック体"
     PvTypeface.MINCHO -> "明朝体"
 }
 
+/** 「小さく ──●── 大きく」のような、ボタン付きのスライダー（刻みで動く） */
+@Composable
+private fun StepSlider(value: Float, min: Float, max: Float, step: Float, less: String, more: String, onChange: (Float) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { onChange((value - step).coerceAtLeast(min)) }) { Text(less) }
+        Slider(
+            value = value,
+            onValueChange = { onChange(it) },
+            valueRange = min..max,
+            steps = ((max - min) / step).toInt() - 1,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = { onChange((value + step).coerceAtMost(max)) }) { Text(more) }
+    }
+}
+
 /**
- * 文章の本の、文字の大きさと書体。変えるとページの区切りが変わるので、適用すると本を開き直す
- * （今のページは、全体に対する位置で引き継ぐ）。
+ * 文章の本の見た目（文字の大きさ・行間・文字間・書体・太字・斜体・色）。変えるとページの区切りが変わるので、
+ * 適用すると本を開き直す（今のページは、全体に対する位置で引き継ぐ）。
  */
 @Composable
 fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: () -> Unit) {
@@ -46,51 +68,45 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
     var ink by remember { mutableStateOf(current.ink.toInt()) }
     var paper by remember { mutableStateOf(current.paper.toInt()) }
     var spacing by remember { mutableFloatStateOf(current.lineSpacing.toFloat().coerceIn(SPACING_MIN, SPACING_MAX)) }
+    var letter by remember { mutableFloatStateOf(current.letterSpacing.toFloat().coerceIn(LETTER_MIN, LETTER_MAX)) }
+    var bold by remember { mutableStateOf(current.bold) }
+    var italic by remember { mutableStateOf(current.italic) }
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text("文字の設定") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(Tr.f("文字の大きさ  {1}", size.roundToInt()))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { size = (size - SIZE_STEP).coerceAtLeast(SIZE_MIN) }) { Text("小さく") }
-                    Slider(
-                        value = size,
-                        onValueChange = { size = it },
-                        valueRange = SIZE_MIN..SIZE_MAX,
-                        steps = ((SIZE_MAX - SIZE_MIN) / SIZE_STEP).toInt() - 1,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { size = (size + SIZE_STEP).coerceAtMost(SIZE_MAX) }) { Text("大きく") }
-                }
+                StepSlider(size, SIZE_MIN, SIZE_MAX, SIZE_STEP, "小さく", "大きく") { size = it }
                 Text(Tr.f("行間  {1}%", spacing.roundToInt()))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { spacing = (spacing - SPACING_STEP).coerceAtLeast(SPACING_MIN) }) { Text("狭く") }
-                    Slider(
-                        value = spacing,
-                        onValueChange = { spacing = it },
-                        valueRange = SPACING_MIN..SPACING_MAX,
-                        steps = ((SPACING_MAX - SPACING_MIN) / SPACING_STEP).toInt() - 1,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { spacing = (spacing + SPACING_STEP).coerceAtMost(SPACING_MAX) }) { Text("広く") }
-                }
+                StepSlider(spacing, SPACING_MIN, SPACING_MAX, SPACING_STEP, "狭く", "広く") { spacing = it }
+                Text(Tr.f("文字間  {1}%", letter.roundToInt()))
+                StepSlider(letter, LETTER_MIN, LETTER_MAX, LETTER_STEP, "詰める", "空ける") { letter = it }
                 Text("文字の色")
                 ColorSwatches(INK_COLORS, ink) { ink = it }
                 Text("背景の色")
                 ColorSwatches(PAPER_COLORS, paper) { paper = it }
-                ColorPreview(ink, paper)
+                ColorPreview(ink, paper, bold, italic)
                 Text("書体")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     faces.forEach { t ->
                         FilterChip(selected = face == t, onClick = { face = t }, label = { Text(typefaceLabel(t)) })
                     }
+                    FilterChip(selected = bold, onClick = { bold = !bold }, label = { Text("太字") })
+                    FilterChip(selected = italic, onClick = { italic = !italic }, label = { Text("斜体") })
                 }
                 if (faces.size < 2) Text("この端末には、ほかの書体のフォントがありません。", style = androidx.compose.material3.MaterialTheme.typography.labelSmall)
             }
         },
         confirmButton = {
-            TextButton(onClick = { onApply(PvTextStyle(size.roundToInt().toUInt(), face, spacing.roundToInt().toUInt(), ink.toUInt(), paper.toUInt())) }) { Text("適用") }
+            TextButton(onClick = {
+                onApply(
+                    PvTextStyle(
+                        size.roundToInt().toUInt(), face, spacing.roundToInt().toUInt(), ink.toUInt(), paper.toUInt(),
+                        letter.roundToInt(), bold, italic,
+                    ),
+                )
+            }) { Text("適用") }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("やめる") } },
     )

@@ -306,6 +306,10 @@ pub struct PvTextStyle {
     pub ink: u32,
     /// 背景の色（`0xRRGGBB`）
     pub paper: u32,
+    /// 文字間（文字の大きさに対する追加の割合、%。-10〜60）
+    pub letter_spacing: i32,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 /// 本をまとめたグループ（シリーズ・フォルダ単位など）

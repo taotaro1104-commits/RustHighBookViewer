@@ -129,17 +129,25 @@ fun SettingsScreen(state: AppState) {
             Choice("書体", text.typeface, faces.map { it to typefaceLabel(it) }) { updateText(text.copy(typeface = it)) }
             Choice(
                 "文字の大きさ", text.size.toInt(),
-                listOf(32, 36, 40, 44, 48, 56, 64).map { it to it.toString() },
+                listOf(32, 36, 40, 44, 48, 56, 64, 80, 96, 112, 128, 160).map { it to it.toString() },
             ) { updateText(text.copy(size = it.toUInt())) }
             Text("文字の色", style = MaterialTheme.typography.bodyMedium)
             ColorSwatches(INK_COLORS, text.ink.toInt()) { updateText(text.copy(ink = it.toUInt())) }
             Text("背景の色", style = MaterialTheme.typography.bodyMedium)
             ColorSwatches(PAPER_COLORS, text.paper.toInt()) { updateText(text.copy(paper = it.toUInt())) }
-            ColorPreview(text.ink.toInt(), text.paper.toInt())
+            ColorPreview(text.ink.toInt(), text.paper.toInt(), text.bold, text.italic)
             Choice(
                 "行間", text.lineSpacing.toInt(),
-                listOf(130, 150, 160, 180, 200, 220).map { it to "$it%" },
+                listOf(100, 110, 120, 130, 150, 160, 180, 200, 220, 240).map { it to "$it%" },
             ) { updateText(text.copy(lineSpacing = it.toUInt())) }
+            Choice(
+                "文字間", text.letterSpacing,
+                listOf(-10, -5, 0, 5, 10, 20, 30, 40, 60).map { it to "$it%" },
+            ) { updateText(text.copy(letterSpacing = it)) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = text.bold, onClick = { updateText(text.copy(bold = !text.bold)) }, label = { Text("太字") })
+                FilterChip(selected = text.italic, onClick = { updateText(text.copy(italic = !text.italic)) }, label = { Text("斜体") })
+            }
         }
 
         Section("キャッシュ（メモリ）") {

@@ -680,6 +680,9 @@ fn text_style_changes_pages_after_reopen_and_persists() {
         line_spacing: 160,
         ink: 0x1C1C1C,
         paper: 0xF5F5F5,
+        letter_spacing: 0,
+        bold: false,
+        italic: false,
     })
     .unwrap();
     let (large, _, _) = pages(&core).unwrap();
@@ -692,6 +695,9 @@ fn text_style_changes_pages_after_reopen_and_persists() {
         line_spacing: 9999,
         ink: 0xFF_FFFFFF,
         paper: 0x20_2020,
+        letter_spacing: 999,
+        bold: true,
+        italic: true,
     })
     .unwrap();
     let saved = PvCore::new(data).unwrap().text_style();
@@ -699,5 +705,7 @@ fn text_style_changes_pages_after_reopen_and_persists() {
     assert_eq!(saved.typeface, PvTypeface::Mincho);
     assert_eq!(saved.line_spacing, pv_container::MAX_LINE_SPACING);
     assert_eq!((saved.ink, saved.paper), (0xFF_FFFF, 0x20_2020));
+    assert_eq!(saved.letter_spacing, pv_container::MAX_LETTER_SPACING);
+    assert!(saved.bold && saved.italic);
     assert!(core.available_typefaces().contains(&PvTypeface::Gothic));
 }

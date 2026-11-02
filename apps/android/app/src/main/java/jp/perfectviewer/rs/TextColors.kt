@@ -19,6 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -72,13 +74,18 @@ internal fun ColorSwatches(options: List<Int>, selected: Int, onSelect: (Int) ->
 
 /** 選んだ色での見え方。コントラストが低いときは注意を出す */
 @Composable
-internal fun ColorPreview(ink: Int, paper: Int) {
+internal fun ColorPreview(ink: Int, paper: Int, bold: Boolean = false, italic: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(
             Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(rgb(paper)).padding(12.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text("吾輩は猫である。名前はまだ無い。", color = rgb(ink))
+            Text(
+                "吾輩は猫である。名前はまだ無い。",
+                color = rgb(ink),
+                fontWeight = if (bold) FontWeight.Bold else null,
+                style = MaterialTheme.typography.bodyMedium.copy(fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal),
+            )
         }
         if (contrastRatio(ink, paper) < MIN_READABLE_CONTRAST) {
             Text(

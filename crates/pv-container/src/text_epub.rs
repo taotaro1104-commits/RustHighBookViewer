@@ -20,7 +20,7 @@ use crate::error::{ContainerError, Result};
 use crate::font::font_for;
 use crate::text_layout::{paginate, parse_xhtml, Block, Page, PageSpec};
 use crate::text_style::TextStyle;
-use crate::text_vertical::{draw_vertical, Canvas};
+use crate::text_vertical::{draw_vertical, Canvas, Column, Look};
 use crate::zip_container::ZipContainer;
 
 /// 描画中は「文字の濃さ」（0 = 背景、255 = 文字色）だけを持ち、最後に色を混ぜる
@@ -55,6 +55,7 @@ impl TextEpubContainer {
         let spec = PageSpec {
             font_px: style.font_px as f32,
             line_gap: style.line_spacing as f32 / 100.0,
+            char_step: 1.0 + style.letter_spacing as f32 / 100.0,
             ..PageSpec::default()
         };
         let cache: RefCell<HashMap<(char, u32), f32>> = RefCell::new(HashMap::new());
@@ -105,11 +106,18 @@ impl TextEpubContainer {
                 draw_vertical(
                     &self.font,
                     &mut canvas,
-                    line.x,
-                    line.y,
-                    line.size,
+                    Column {
+                        cx: line.x,
+                        top: line.y,
+                        size: line.size,
+                        pitch: line.pitch,
+                    },
                     &line.text,
                     INK,
+                    Look {
+                        bold: self.style.bold,
+                        italic: self.style.italic,
+                    },
                 );
                 continue;
             }
@@ -369,6 +377,60 @@ mod tests {
         assert_eq!(ch[0][0], Block::Heading(2, "第1話".into()));
     }
 
+    /// 太字・斜体・文字間は、描いたページの見た目を変える
+    #[test]
+    fn bold_italic_and_spacing_change_the_page() {
+        if font_for(Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let render = |style: TextStyle| {
+            let Ok(Ok(c)) = TextEpubContainer::try_open_with(novel(), style) else {
+                panic!("text epub should open");
+            };
+            c.read(EntryId(0)).unwrap()
+        };
+        let plain = render(TextStyle::default());
+        assert_ne!(
+            plain,
+            render(TextStyle {
+                bold: true,
+                ..TextStyle::default()
+            }),
+            "太字"
+        );
+        assert_ne!(
+            plain,
+            render(TextStyle {
+                italic: true,
+                ..TextStyle::default()
+            }),
+            "斜体"
+        );
+        assert_ne!(
+            plain,
+            render(TextStyle {
+                letter_spacing: 30,
+                ..TextStyle::default()
+            }),
+            "文字間"
+        );
+        // 太字は、文字の画素が増える（インクの量が増える）
+        let ink = |data: &[u8]| {
+            let mut dec = png::Decoder::new(std::io::Cursor::new(data.to_vec()))
+                .read_info()
+                .unwrap();
+            let mut img = vec![0u8; dec.output_buffer_size().unwrap()];
+            dec.next_frame(&mut img).unwrap();
+            img.iter().map(|&v| 255 - u64::from(v)).sum::<u64>()
+        };
+        let bold = render(TextStyle {
+            bold: true,
+            ..TextStyle::default()
+        });
+        assert!(ink(&bold) > ink(&plain));
+    }
+
     /// 文字色と背景色が、描いたページに反映される
     #[test]
     fn page_uses_the_chosen_colors() {
@@ -492,5 +554,76 @@ fn bench_real_text_epub() {
         for i in [0u32, 3, 7] {
             std::fs::write(format!("{dir}/p{i}.png"), c.read(EntryId(i)).unwrap()).unwrap();
         }
+    }
+}
+
+/// 計測・目視用: `PV_TEXT_EPUB` を各スタイルで開き、3 ページ目を `PV_OUT` へ書き出す（通常は動かさない）。
+#[cfg(test)]
+#[test]
+#[ignore]
+fn gallery_of_styles() {
+    use crate::source::FileSource;
+    let path = std::env::var("PV_TEXT_EPUB").expect("PV_TEXT_EPUB");
+    let out = std::env::var("PV_OUT").expect("PV_OUT");
+    let styles = [
+        ("plain", TextStyle::default()),
+        (
+            "huge",
+            TextStyle {
+                font_px: 140,
+                ..TextStyle::default()
+            },
+        ),
+        (
+            "tight",
+            TextStyle {
+                line_spacing: 100,
+                font_px: 36,
+                ..TextStyle::default()
+            },
+        ),
+        (
+            "wide",
+            TextStyle {
+                letter_spacing: 40,
+                ..TextStyle::default()
+            },
+        ),
+        (
+            "bold",
+            TextStyle {
+                bold: true,
+                ..TextStyle::default()
+            },
+        ),
+        (
+            "italic",
+            TextStyle {
+                italic: true,
+                ..TextStyle::default()
+            },
+        ),
+        (
+            "all",
+            TextStyle {
+                bold: true,
+                italic: true,
+                letter_spacing: 15,
+                line_spacing: 140,
+                ..TextStyle::default()
+            },
+        ),
+    ];
+    for (name, style) in styles {
+        let zip = ZipContainer::open(
+            Arc::new(FileSource::open(std::path::Path::new(&path)).unwrap()),
+            crate::container::Limits::default(),
+        )
+        .unwrap();
+        let Ok(Ok(c)) = TextEpubContainer::try_open_with(zip, style) else {
+            panic!("not text epub")
+        };
+        eprintln!("{name}: {} pages", c.entries().len());
+        std::fs::write(format!("{out}/{name}.png"), c.read(EntryId(1)).unwrap()).unwrap();
     }
 }

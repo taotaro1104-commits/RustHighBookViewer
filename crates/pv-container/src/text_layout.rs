@@ -26,6 +26,8 @@ pub struct Line {
     pub x: f32,
     pub y: f32,
     pub size: f32,
+    /// 縦書きで、文字を並べる間隔（文字間を含む）
+    pub pitch: f32,
     pub text: String,
 }
 
@@ -47,6 +49,8 @@ pub struct PageSpec {
     pub vertical: bool,
     /// 行の送り幅（文字の大きさに対する倍率）
     pub line_gap: f32,
+    /// 文字の送り幅の、文字の大きさに対する倍率（1.0 = 詰めなし）
+    pub char_step: f32,
 }
 
 impl Default for PageSpec {
@@ -60,6 +64,7 @@ impl Default for PageSpec {
             font_px: 44.0,
             vertical: true,
             line_gap: LINE_GAP_V,
+            char_step: 1.0,
         }
     }
 }
@@ -311,6 +316,7 @@ impl Pager<'_> {
 
     /// 行を 1 本置く。`indent` は行頭の字下げ（行の向きに沿った長さ）。
     fn put(&mut self, size: f32, pitch: f32, indent: f32, text: String) {
+        let char_pitch = size * self.spec.char_step;
         if self.used + pitch > self.stack_extent() && !self.at_top() {
             self.new_page();
         }
@@ -325,14 +331,20 @@ impl Pager<'_> {
                 self.spec.margin_top + self.used,
             )
         };
-        self.cur.lines.push(Line { x, y, size, text });
+        self.cur.lines.push(Line {
+            x,
+            y,
+            size,
+            pitch: char_pitch,
+            text,
+        });
         self.used += pitch;
     }
 }
 
-/// 縦書きでは、どの文字も 1 マス（`size`）を占める。
-fn cell(_c: char, size: f32) -> f32 {
-    size
+/// 縦書きでは、どの文字も 1 マス（文字の大きさ × `step`）を占める。
+fn cell(step: f32) -> impl Fn(char, f32) -> f32 {
+    move |_c, size| size * step
 }
 
 /// 章ごとのブロックを、ページに割り付ける。章の初めは必ず新しいページから始める。
@@ -346,7 +358,8 @@ pub fn paginate(chapters: &[Vec<Block>], spec: PageSpec, adv: Advance) -> Vec<Pa
     };
     let line_len = pg.line_extent();
     let gap = spec.line_gap;
-    let metric: Advance = if spec.vertical { &cell } else { adv };
+    let vertical_cell = cell(spec.char_step);
+    let metric: Advance = if spec.vertical { &vertical_cell } else { adv };
     for blocks in chapters {
         pg.new_page();
         for b in blocks {
@@ -358,7 +371,8 @@ pub fn paginate(chapters: &[Vec<Block>], spec: PageSpec, adv: Advance) -> Vec<Pa
                 }
                 Block::Heading(level, text) => {
                     let size = spec.font_px * heading_scale(*level);
-                    let pitch = size * (gap - 0.25);
+                    // 見出しは、行を狭くしても列どうしが重ならないよう、1 マス分は空ける
+                    let pitch = size * (gap - 0.25).max(1.05);
                     if !pg.at_top() {
                         pg.used += pitch * 0.6;
                     }
@@ -370,7 +384,7 @@ pub fn paginate(chapters: &[Vec<Block>], spec: PageSpec, adv: Advance) -> Vec<Pa
                 Block::Para { text, indent } => {
                     let size = spec.font_px;
                     let pitch = size * gap;
-                    let first = if *indent { size } else { 0.0 };
+                    let first = if *indent { size * spec.char_step } else { 0.0 };
                     for (ind, line) in wrap(text, first, line_len, size, metric) {
                         pg.put(size, pitch, ind, line);
                     }
@@ -476,6 +490,7 @@ mod tests {
             font_px: 20.0,
             vertical: false,
             line_gap: 1.75,
+            char_step: 1.0,
         };
         let long: Vec<Block> = (0..30)
             .map(|i| Block::Para {
@@ -511,6 +526,7 @@ mod tests {
             font_px: 20.0,
             vertical: true,
             line_gap: 1.6,
+            char_step: 1.0,
         };
         let text = "あいうえおかきくけこさしすせそ".to_owned(); // 15 字、先頭は 1 マス字下げ
         let pages = paginate(&[vec![Block::Para { text, indent: true }]], spec, &adv);
@@ -563,5 +579,60 @@ mod tests {
             .len()
         };
         assert!(pages(1.2) < pages(1.6) && pages(1.6) < pages(2.4));
+    }
+
+    #[test]
+    fn wider_letter_spacing_puts_fewer_characters_in_a_column() {
+        let base = PageSpec::default();
+        let text = vec![Block::Para {
+            text: "あ".repeat(200),
+            indent: false,
+        }];
+        let first_col = |step: f32| {
+            let pages = paginate(
+                std::slice::from_ref(&text),
+                PageSpec {
+                    char_step: step,
+                    ..base
+                },
+                &adv,
+            );
+            pages[0].lines[0].text.chars().count()
+        };
+        assert!(first_col(1.0) > first_col(1.3));
+        assert!(first_col(0.9) > first_col(1.0));
+        // 文字の送り幅は行に残り、描画側が使う
+        let pages = paginate(
+            std::slice::from_ref(&text),
+            PageSpec {
+                char_step: 1.25,
+                ..base
+            },
+            &adv,
+        );
+        assert!((pages[0].lines[0].pitch - base.font_px * 1.25).abs() < 0.01);
+    }
+
+    #[test]
+    fn tight_line_spacing_still_fits_more_columns_per_page() {
+        let base = PageSpec::default();
+        let text: Vec<Block> = (0..40)
+            .map(|_| Block::Para {
+                text: "あ".repeat(60),
+                indent: false,
+            })
+            .collect();
+        let pages = |g: f32| {
+            paginate(
+                std::slice::from_ref(&text),
+                PageSpec {
+                    line_gap: g,
+                    ..base
+                },
+                &adv,
+            )
+            .len()
+        };
+        assert!(pages(1.0) < pages(1.2));
     }
 }

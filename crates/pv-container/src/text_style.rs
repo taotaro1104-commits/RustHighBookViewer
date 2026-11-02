@@ -5,12 +5,15 @@
 use serde::{Deserialize, Serialize};
 
 pub const MIN_FONT_PX: u32 = 28;
-pub const MAX_FONT_PX: u32 = 80;
+pub const MAX_FONT_PX: u32 = 160;
 pub const DEFAULT_FONT_PX: u32 = 44;
 /// 行間（文字の大きさに対する割合、%）。100 で行どうしが接する
-pub const MIN_LINE_SPACING: u32 = 120;
+pub const MIN_LINE_SPACING: u32 = 100;
 pub const MAX_LINE_SPACING: u32 = 240;
 pub const DEFAULT_LINE_SPACING: u32 = 160;
+/// 文字間（文字の大きさに対する追加の割合、%）。0 で詰めなし、負で詰める
+pub const MIN_LETTER_SPACING: i32 = -10;
+pub const MAX_LETTER_SPACING: i32 = 60;
 /// 文字色・背景色の既定（`0xRRGGBB`）
 pub const DEFAULT_INK: u32 = 0x1C1C1C;
 pub const DEFAULT_PAPER: u32 = 0xF5F5F5;
@@ -38,6 +41,12 @@ pub struct TextStyle {
     pub ink: u32,
     /// 背景（紙）の色（`0xRRGGBB`）
     pub paper: u32,
+    /// 文字間（文字の大きさに対する追加の割合、%）
+    pub letter_spacing: i32,
+    /// 太字（フォントに太字が無いため、輪郭を太らせて描く）
+    pub bold: bool,
+    /// 斜体（フォントに斜体が無いため、傾けて描く）
+    pub italic: bool,
 }
 
 impl Default for TextStyle {
@@ -48,6 +57,9 @@ impl Default for TextStyle {
             line_spacing: DEFAULT_LINE_SPACING,
             ink: DEFAULT_INK,
             paper: DEFAULT_PAPER,
+            letter_spacing: 0,
+            bold: false,
+            italic: false,
         }
     }
 }
@@ -60,6 +72,9 @@ impl TextStyle {
             line_spacing: self.line_spacing.clamp(MIN_LINE_SPACING, MAX_LINE_SPACING),
             ink: self.ink & 0xFF_FFFF,
             paper: self.paper & 0xFF_FFFF,
+            letter_spacing: self
+                .letter_spacing
+                .clamp(MIN_LETTER_SPACING, MAX_LETTER_SPACING),
             ..self
         }
     }
@@ -78,11 +93,13 @@ mod tests {
                 line_spacing: 160,
                 ink: 0,
                 paper: 0,
+                ..TextStyle::default()
             }
             .clamped()
             .font_px
         };
         assert_eq!((s(0), s(44), s(10_000)), (MIN_FONT_PX, 44, MAX_FONT_PX));
+        assert_eq!(MAX_FONT_PX, 160);
     }
 
     #[test]
@@ -112,7 +129,10 @@ mod tests {
                 typeface: Typeface::Mincho,
                 line_spacing: DEFAULT_LINE_SPACING,
                 ink: DEFAULT_INK,
-                paper: DEFAULT_PAPER
+                paper: DEFAULT_PAPER,
+                letter_spacing: 0,
+                bold: false,
+                italic: false
             }
         );
         // 欠けている項目は既定値
@@ -129,5 +149,21 @@ mod tests {
         }
         .clamped();
         assert_eq!((s.ink, s.paper), (0xAB_CDEF, 0));
+    }
+
+    #[test]
+    fn letter_spacing_is_clamped_and_may_be_negative() {
+        let l = |v| {
+            TextStyle {
+                letter_spacing: v,
+                ..TextStyle::default()
+            }
+            .clamped()
+            .letter_spacing
+        };
+        assert_eq!(
+            (l(-500), l(-5), l(0), l(25), l(500)),
+            (MIN_LETTER_SPACING, -5, 0, 25, MAX_LETTER_SPACING)
+        );
     }
 }

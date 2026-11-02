@@ -6,14 +6,14 @@
 
 Rust で作った、コミック・画像・小説のビューアです。ZIP/CBZ・7z・RAR・EPUB・画像フォルダを、右綴じの見開きや縦書きで読めます。Android と Windows で動きます。
 
-> **状況: 開発中（v0.1.x・プレリリース）。** Android はエミュレータ（Android 15）での確認までで、実機での動作は未確認です。
+> **状況: 開発中（最新版 v0.1.8・プレリリース）。** Android はエミュレータ（Android 15）での確認までで、実機での動作は未確認です。
 
 ## 特長
 
 - **いろいろな形式を開けます**: ZIP / CBZ、7z、RAR（4.x / 5.x、暗号化なし）、EPUB、画像フォルダ。
 - **読みやすい表示**: 単ページ・見開き・自動見開き・縦スクロール。右綴じ／左綴じ、表紙だけ単独表示、横長ページは単独表示。幅・高さ・全体・全画面のフィット。
 - **拡大とルーペ**: ピンチやダブルタップで拡大してパン。指でなぞった所を 2 倍に拡大するルーペ（Android）。
-- **EPUB（コミックも小説も）**: 1 ページが 1 枚の画像の EPUB（コミック・写真集）を読む順に開きます。画像の無い文章の EPUB（Web 小説など）は、端末の日本語フォントで **縦書き** のページに描いて表示します。文字の大きさ（28〜80）・行間（120〜240%）・ゴシック体／明朝体・文字色と背景色（白・生成り・セピア・黒など）を、閲覧メニューと設定画面から変えられます。
+- **EPUB（コミックも小説も）**: 1 ページが 1 枚の画像の EPUB（コミック・写真集）を読む順に開きます。画像の無い文章の EPUB（Web 小説など）は、端末の日本語フォントで **縦書き** のページに描いて表示します。文字の大きさ（28〜160）・行間（100〜240%）・文字間（-10〜+60%）・太字・斜体・ゴシック体／明朝体・文字色と背景色（白・生成り・セピア・うすい緑・濃いグレー・黒の背景、黒・茶・紺・緑・明るいグレー・白の文字）を、閲覧メニューと設定画面から変えられます。選んだ配色のプレビューを見ながら変えられ、文字と背景が近くて読みにくいときは注意が出ます。
 - **本棚**: 履歴・お気に入り・タイトル検索。サムネイル表示と、ファイル・フォルダ名の一覧表示を切り替えられます。閉じても読んでいた位置を保存して、続きから開けます。本を閉じたときは、本棚を開く前の状態（タブ・検索・スクロール位置）に戻ります。
 - **グループ化**: 複数の本をグループにまとめられます。複数の本が入ったフォルダを読み込むと、フォルダ名のグループが自動で作られます。
 - **フォルダの一括読み込み**: 各フォルダ直下の画像を 1 冊に、EPUB・ZIP・7z・RAR は 1 ファイルを 1 冊にして、サブフォルダも含めて本棚へ登録します（Android は並列で登録）。
@@ -29,6 +29,7 @@ Rust で作った、コミック・画像・小説のビューアです。ZIP/CB
 <table><tr><td align="center"><img src="docs/screenshots/ja-shelf.png" width="190"><br><sub>本棚（サムネイル）</sub></td><td align="center"><img src="docs/screenshots/ja-shelf-list.png" width="190"><br><sub>本棚（名前の一覧）</sub></td><td align="center"><img src="docs/screenshots/ja-group-books.png" width="190"><br><sub>グループ</sub></td><td align="center"><img src="docs/screenshots/ja-folder-browser.png" width="190"><br><sub>フォルダ選択</sub></td></tr></table>
 <table><tr><td align="center"><img src="docs/screenshots/ja-reader-spread.png" width="190"><br><sub>見開き（右綴じ）</sub></td><td align="center"><img src="docs/screenshots/ja-reader-menu.png" width="190"><br><sub>閲覧メニュー</sub></td><td align="center"><img src="docs/screenshots/ja-reader-magnifier.png" width="190"><br><sub>ルーペ</sub></td><td align="center"><img src="docs/screenshots/ja-reader-fullscreen.png" width="190"><br><sub>全画面フィット</sub></td></tr></table>
 <table><tr><td align="center"><img src="docs/screenshots/ja-novel-vertical.png" width="190"><br><sub>文章 EPUB（縦書き）</sub></td><td align="center"><img src="docs/screenshots/ja-novel-mincho.png" width="190"><br><sub>明朝体・大きめの文字</sub></td><td align="center"><img src="docs/screenshots/ja-novel-text-settings.png" width="190"><br><sub>文字の設定</sub></td><td align="center"><img src="docs/screenshots/ja-color-adjust.png" width="190"><br><sub>色調整</sub></td></tr></table>
+<table><tr><td align="center"><img src="docs/screenshots/ja-novel-sepia.png" width="190"><br><sub>セピア配色</sub></td><td align="center"><img src="docs/screenshots/ja-groups.png" width="190"><br><sub>グループ一覧</sub></td><td align="center"><img src="docs/screenshots/en-shelf.png" width="190"><br><sub>英語表示の本棚</sub></td><td align="center"><img src="docs/screenshots/en-reader-menu.png" width="190"><br><sub>英語表示の閲覧メニュー</sub></td></tr></table>
 
 ## 対応環境
 
