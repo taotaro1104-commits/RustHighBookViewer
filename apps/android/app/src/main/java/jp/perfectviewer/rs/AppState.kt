@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.pv_ffi.PvBook
 import uniffi.pv_ffi.PvCore
+import uniffi.pv_ffi.PvDirection
 import uniffi.pv_ffi.PvGroup
 import uniffi.pv_ffi.PvException
 import uniffi.pv_ffi.PvReader
@@ -302,9 +303,16 @@ class AppState private constructor(private val context: Context) {
         val uri = current.uri()
         val last = (current.pageCount().toInt() - 1).coerceAtLeast(1)
         val fraction = current.currentPage().toFloat() / last
+        val wasVertical = withContext(Dispatchers.IO) { core.textStyle().vertical }
         withContext(Dispatchers.IO) { core.setTextStyle(style) }
         toast("文字の設定を適用中…")
         afterOpen = { r ->
+            if (style.vertical != wasVertical) {
+                // 縦書きは右綴じ（左へめくる）、横書きは左綴じ（右へめくる）に合わせる
+                val layout = r.layout()
+                val dir = if (style.vertical) PvDirection.RIGHT_TO_LEFT else PvDirection.LEFT_TO_RIGHT
+                if (layout.direction != dir) r.setLayout(layout.mode, dir)
+            }
             r.goToPage(((r.pageCount().toInt() - 1).coerceAtLeast(0) * fraction).roundToInt().toUInt())
         }
         openBook(uri)

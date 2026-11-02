@@ -71,11 +71,17 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
     var letter by remember { mutableFloatStateOf(current.letterSpacing.toFloat().coerceIn(LETTER_MIN, LETTER_MAX)) }
     var bold by remember { mutableStateOf(current.bold) }
     var italic by remember { mutableStateOf(current.italic) }
+    var vertical by remember { mutableStateOf(current.vertical) }
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text("文字の設定") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("文字の向き")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    FilterChip(selected = vertical, onClick = { vertical = true }, label = { Text("縦書き") })
+                    FilterChip(selected = !vertical, onClick = { vertical = false }, label = { Text("横書き") })
+                }
                 Text(Tr.f("文字の大きさ  {1}", size.roundToInt()))
                 StepSlider(size, SIZE_MIN, SIZE_MAX, SIZE_STEP, "小さく", "大きく") { size = it }
                 Text(Tr.f("行間  {1}%", spacing.roundToInt()))
@@ -103,7 +109,7 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
                 onApply(
                     PvTextStyle(
                         size.roundToInt().toUInt(), face, spacing.roundToInt().toUInt(), ink.toUInt(), paper.toUInt(),
-                        letter.roundToInt(), bold, italic,
+                        letter.roundToInt(), bold, italic, vertical,
                     ),
                 )
             }) { Text("適用") }

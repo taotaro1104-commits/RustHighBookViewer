@@ -121,6 +121,7 @@ impl PvCore {
             letter_spacing: t.letter_spacing,
             bold: t.bold,
             italic: t.italic,
+            vertical: t.vertical,
         }
     }
 
@@ -138,6 +139,7 @@ impl PvCore {
             letter_spacing: style.letter_spacing,
             bold: style.bold,
             italic: style.italic,
+            vertical: style.vertical,
         }
         .clamped();
         updated.save(&self.settings_path).map_err(PvError::new)?;
@@ -504,7 +506,12 @@ impl PvCore {
             _ if container.is_text() => {
                 let mut layout = settings.layout;
                 layout.mode = pv_core::ViewMode::Single;
-                layout.direction = pv_core::Direction::RightToLeft;
+                // 縦書きは右綴じ（左へめくる）、横書きは左綴じ（右へめくる）
+                layout.direction = if settings.text.vertical {
+                    pv_core::Direction::RightToLeft
+                } else {
+                    pv_core::Direction::LeftToRight
+                };
                 session.set_layout(layout);
             }
             _ => {}

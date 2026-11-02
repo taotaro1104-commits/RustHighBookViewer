@@ -359,7 +359,14 @@ pub fn paginate(chapters: &[Vec<Block>], spec: PageSpec, adv: Advance) -> Vec<Pa
     let line_len = pg.line_extent();
     let gap = spec.line_gap;
     let vertical_cell = cell(spec.char_step);
-    let metric: Advance = if spec.vertical { &vertical_cell } else { adv };
+    // 横書きの文字幅は、フォントの送り幅に文字間（追加分）を足したもの
+    let extra = spec.char_step - 1.0;
+    let horizontal_cell = move |c: char, size: f32| adv(c, size) + size * extra;
+    let metric: Advance = if spec.vertical {
+        &vertical_cell
+    } else {
+        &horizontal_cell
+    };
     for blocks in chapters {
         pg.new_page();
         for b in blocks {
@@ -634,5 +641,34 @@ mod tests {
             .len()
         };
         assert!(pages(1.0) < pages(1.2));
+    }
+
+    #[test]
+    fn horizontal_lines_stack_downward_and_letter_spacing_shortens_them() {
+        let base = PageSpec {
+            vertical: false,
+            ..PageSpec::default()
+        };
+        let text = vec![Block::Para {
+            text: "あ".repeat(200),
+            indent: false,
+        }];
+        let pages = paginate(std::slice::from_ref(&text), base, &adv);
+        let lines = &pages[0].lines;
+        // 行は左端にそろい、上から下へ積まれる
+        assert!(lines.iter().all(|l| (l.x - base.margin_x).abs() < 0.01));
+        assert!(lines[1].y > lines[0].y);
+        let first = |step: f32| {
+            let p = paginate(
+                std::slice::from_ref(&text),
+                PageSpec {
+                    char_step: step,
+                    ..base
+                },
+                &adv,
+            );
+            p[0].lines[0].text.chars().count()
+        };
+        assert!(first(1.0) > first(1.4));
     }
 }

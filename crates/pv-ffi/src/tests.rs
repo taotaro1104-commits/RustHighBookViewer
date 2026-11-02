@@ -683,6 +683,7 @@ fn text_style_changes_pages_after_reopen_and_persists() {
         letter_spacing: 0,
         bold: false,
         italic: false,
+        vertical: true,
     })
     .unwrap();
     let (large, _, _) = pages(&core).unwrap();
@@ -698,6 +699,7 @@ fn text_style_changes_pages_after_reopen_and_persists() {
         letter_spacing: 999,
         bold: true,
         italic: true,
+        vertical: false,
     })
     .unwrap();
     let saved = PvCore::new(data).unwrap().text_style();
@@ -707,5 +709,6 @@ fn text_style_changes_pages_after_reopen_and_persists() {
     assert_eq!((saved.ink, saved.paper), (0xFF_FFFF, 0x20_2020));
     assert_eq!(saved.letter_spacing, pv_container::MAX_LETTER_SPACING);
     assert!(saved.bold && saved.italic);
+    assert!(!saved.vertical, "横書きの設定が保存される");
     assert!(core.available_typefaces().contains(&PvTypeface::Gothic));
 }

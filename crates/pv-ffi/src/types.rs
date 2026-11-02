@@ -310,6 +310,8 @@ pub struct PvTextStyle {
     pub letter_spacing: i32,
     pub bold: bool,
     pub italic: bool,
+    /// 縦書き（false なら横書き）
+    pub vertical: bool,
 }
 
 /// 本をまとめたグループ（シリーズ・フォルダ単位など）

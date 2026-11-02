@@ -206,6 +206,9 @@ internal val TRANSLATIONS: Map<String, List<String>> = buildMap {
     e("背景の色", "Background color", "背景颜色", "배경 색", "Color de fondo")
     e("文字の色と背景の色が近く、読みにくくなります。", "The text and background colors are too close, so it will be hard to read.", "文字颜色与背景颜色太接近，会难以阅读。", "글자 색과 배경 색이 비슷해서 읽기 어렵습니다.", "El color del texto y el del fondo son muy parecidos y costará leer.")
     e("吾輩は猫である。名前はまだ無い。", "I am a cat. As yet I have no name.", "吾輩是猫。名字还没有。", "나는 고양이로소이다. 이름은 아직 없다.", "Soy un gato. Aún no tengo nombre.")
+    e("文字の向き", "Text direction", "文字方向", "글자 방향", "Dirección del texto")
+    e("縦書き", "Vertical", "竖排", "세로쓰기", "Vertical")
+    e("横書き", "Horizontal", "横排", "가로쓰기", "Horizontal")
     e("文字間  {1}%", "Letter spacing  {1}%", "字间距  {1}%", "글자 간격  {1}%", "Espaciado de letras  {1}%")
     e("文字間", "Letter spacing", "字间距", "글자 간격", "Espaciado de letras")
     e("詰める", "Tighter", "收紧", "좁게", "Juntar")
@@ -218,11 +221,11 @@ internal val TRANSLATIONS: Map<String, List<String>> = buildMap {
     e("広く", "Looser", "放大", "넓게", "Más")
     e("文章の本（EPUB）", "Text books (EPUB)", "文字书籍（EPUB）", "문장 책 (EPUB)", "Libros de texto (EPUB)")
     e(
-        "画像の無い文章の EPUB を、縦書きで表示するときの見た目です。変更は、次に本を開いたときから反映されます（開いている本は、閲覧メニューの「文字」で開き直せます）。",
-        "How text-only EPUBs are displayed in vertical writing. Changes apply the next time you open a book (an open book can be reloaded with “Text” in the reader menu).",
-        "没有图片的纯文字 EPUB 以竖排显示时的外观。更改将在下次打开书时生效（已打开的书可通过阅读菜单中的“文字”重新载入）。",
-        "이미지가 없는 문장 EPUB을 세로쓰기로 표시할 때의 모양입니다. 변경 사항은 다음에 책을 열 때부터 적용됩니다 (열려 있는 책은 열람 메뉴의 “글자”로 다시 열 수 있습니다).",
-        "Aspecto de los EPUB de solo texto en escritura vertical. Los cambios se aplican la próxima vez que abras un libro (un libro abierto se recarga con «Texto» en el menú del lector).",
+        "画像の無い文章の EPUB を表示するときの見た目です。変更は、次に本を開いたときから反映されます（開いている本は、閲覧メニューの「文字」で開き直せます）。",
+        "How text-only EPUBs are displayed. Changes apply the next time you open a book (an open book can be reloaded with “Text” in the reader menu).",
+        "没有图片的纯文字 EPUB 的显示外观。更改将在下次打开书时生效（已打开的书可通过阅读菜单中的“文字”重新载入）。",
+        "이미지가 없는 문장 EPUB을 표시할 때의 모양입니다. 변경 사항은 다음에 책을 열 때부터 적용됩니다 (열려 있는 책은 열람 메뉴의 “글자”로 다시 열 수 있습니다).",
+        "Aspecto de los EPUB de solo texto. Los cambios se aplican la próxima vez que abras un libro (un libro abierto se recarga con «Texto» en el menú del lector).",
     )
     e("文字の大きさ", "Text size", "文字大小", "글자 크기", "Tamaño del texto")
     e("ゴシック体", "Gothic", "黑体", "고딕체", "Gótica")

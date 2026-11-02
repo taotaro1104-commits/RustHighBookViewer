@@ -6,14 +6,14 @@
 
 A comic, image and novel viewer written in Rust. It reads ZIP/CBZ, 7z, RAR, EPUB and folders of images, with right-to-left two-page spreads and vertical-writing text. It runs on Android and Windows.
 
-> **Status: under development (latest v0.1.8, pre-release).** On Android it has only been checked in an Android 15 emulator; it has not been tested on a real device yet.
+> **Status: under development (latest v0.1.9, pre-release).** On Android it has only been checked in an Android 15 emulator; it has not been tested on a real device yet.
 
 ## Features
 
 - **Many formats**: ZIP / CBZ, 7z, RAR (4.x / 5.x, not encrypted), EPUB, and folders of images.
 - **Comfortable reading**: single page, two pages, automatic spread, and vertical scrolling. Right or left binding, a cover shown on its own, wide pages shown alone, and fit to width / height / whole page / fullscreen.
 - **Zoom and magnifier**: pinch or double-tap to zoom and pan; a 2x magnifier that follows your finger (Android).
-- **EPUB, comics and novels**: image-based EPUBs (comics, photo books) open in reading order. Text-only EPUBs such as web novels are drawn page by page as **vertical writing** with a Japanese font from the device. You can change the text size (28–160), the line spacing (100–240%), the letter spacing (-10 to +60%), bold and italic, the typeface (Gothic or Mincho/serif) and the text and background colors (backgrounds: white, ivory, sepia, light green, dark gray, black; text: black, brown, navy, green, light gray, white) from the reader menu and the settings screen. A live preview shows the chosen colors, and you get a warning when the text and background are too close to read.
+- **EPUB, comics and novels**: image-based EPUBs (comics, photo books) open in reading order. Text-only EPUBs such as web novels are drawn page by page with a Japanese font from the device, in **vertical writing (switchable to horizontal)**. You can change the text size (28–160), the line spacing (100–240%), the letter spacing (-10 to +60%), bold and italic, the typeface (Gothic or Mincho/serif) and the text and background colors (backgrounds: white, ivory, sepia, light green, dark gray, black; text: black, brown, navy, green, light gray, white) from the reader menu and the settings screen. A live preview shows the chosen colors, and you get a warning when the text and background are too close to read.
 - **Shelf**: history, favorites and title search, with a thumbnail view or a plain list of file and folder names. Your reading position is saved, and closing a book takes you back to the shelf exactly as it was (tab, search, scroll position).
 - **Groups**: put several books into a group. Importing a folder that contains several books creates a group named after the folder automatically.
 - **Bulk folder import**: the images directly inside a folder become one book, and each EPUB / ZIP / 7z / RAR file becomes its own book, subfolders included, all added to the shelf (registered in parallel on Android).

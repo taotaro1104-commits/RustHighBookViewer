@@ -56,6 +56,7 @@ impl TextEpubContainer {
             font_px: style.font_px as f32,
             line_gap: style.line_spacing as f32 / 100.0,
             char_step: 1.0 + style.letter_spacing as f32 / 100.0,
+            vertical: style.vertical,
             ..PageSpec::default()
         };
         let cache: RefCell<HashMap<(char, u32), f32>> = RefCell::new(HashMap::new());
@@ -125,13 +126,18 @@ impl TextEpubContainer {
             draw_text(
                 &self.font,
                 &mut buf,
-                w,
-                h,
-                line.x,
-                line.y + ascent,
+                (w, h),
+                (line.x, line.y + ascent),
                 line.size,
                 &line.text,
                 INK,
+                HLook {
+                    extra: line.size * (self.spec.char_step - 1.0),
+                    look: Look {
+                        bold: self.style.bold,
+                        italic: self.style.italic,
+                    },
+                },
             );
         }
         let footer = format!("{} / {}", id.0 + 1, self.pages.len());
@@ -143,13 +149,12 @@ impl TextEpubContainer {
         draw_text(
             &self.font,
             &mut buf,
-            w,
-            h,
-            (self.spec.width - fw) / 2.0,
-            fy,
+            (w, h),
+            ((self.spec.width - fw) / 2.0, fy),
             FOOTER_PX,
             &footer,
             FOOTER_INK,
+            HLook::default(),
         );
         encode_png(&colorize(&buf, self.style), w as u32, h as u32)
     }
@@ -160,29 +165,55 @@ fn advance(font: &FontVec, c: char, size: f32) -> f32 {
         .h_advance(font.glyph_id(c))
 }
 
-/// 文字を `baseline` に沿って描く（はみ出す部分は捨てる）。
+/// 横書きの字形の見た目（文字間の追加分と、太字・斜体）
+#[derive(Debug, Clone, Copy, Default)]
+struct HLook {
+    /// 1 文字ごとに足す送り幅（画素）
+    extra: f32,
+    look: Look,
+}
+
+/// 斜体の傾き（高さ 1 に対する横ずれ）
+const H_ITALIC_SLANT: f32 = 0.2;
+
+/// 文字を `baseline` に沿って描く（はみ出す部分は捨てる）。`dims` は (幅, 高さ)、`origin` は (行頭の x, ベースライン)。
 #[allow(clippy::too_many_arguments)]
 fn draw_text(
     font: &FontVec,
     buf: &mut [u8],
-    w: usize,
-    h: usize,
-    x: f32,
-    baseline: f32,
+    dims: (usize, usize),
+    origin: (f32, f32),
     size: f32,
     text: &str,
     ink: u8,
+    look: HLook,
 ) {
+    let (w, h) = dims;
+    let (x, baseline) = origin;
     let scaled = font.as_scaled(PxScale::from(size));
+    let thick = if look.look.bold { size * 0.035 } else { 0.0 };
+    let offsets: &[(f32, f32)] = if look.look.bold {
+        &[(0.0, 0.0), (thick, 0.0), (0.0, thick), (thick, thick)]
+    } else {
+        &[(0.0, 0.0)]
+    };
     let mut pen = x;
     for c in text.chars() {
         let id = font.glyph_id(c);
-        let glyph = id.with_scale_and_position(PxScale::from(size), point(pen, baseline));
-        if let Some(outlined) = font.outline_glyph(glyph) {
+        for &(ox, oy) in offsets {
+            let glyph =
+                id.with_scale_and_position(PxScale::from(size), point(pen + ox, baseline + oy));
+            let Some(outlined) = font.outline_glyph(glyph) else {
+                continue;
+            };
             let b = outlined.px_bounds();
             outlined.draw(|gx, gy, cov| {
-                let px = b.min.x as i64 + i64::from(gx);
+                let mut px = b.min.x as i64 + i64::from(gx);
                 let py = b.min.y as i64 + i64::from(gy);
+                if look.look.italic {
+                    // ベースラインを軸に、上ほど右へ傾ける
+                    px += ((baseline - py as f32) * H_ITALIC_SLANT).round() as i64;
+                }
                 if px < 0 || py < 0 || px >= w as i64 || py >= h as i64 {
                     return;
                 }
@@ -191,7 +222,7 @@ fn draw_text(
                 *dst = ((u32::from(*dst) * (255 - a) + u32::from(ink) * a) / 255) as u8;
             });
         }
-        pen += scaled.h_advance(id);
+        pen += scaled.h_advance(id) + look.extra;
     }
 }
 
@@ -431,6 +462,57 @@ mod tests {
         assert!(ink(&bold) > ink(&plain));
     }
 
+    /// 横書きでも開けて描け、縦書きとは別のページになる
+    #[test]
+    fn horizontal_writing_renders_differently_from_vertical() {
+        if font_for(Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let render = |style: TextStyle| {
+            let Ok(Ok(c)) = TextEpubContainer::try_open_with(novel(), style) else {
+                panic!("text epub should open");
+            };
+            (c.entries().len(), c.read(EntryId(0)).unwrap())
+        };
+        let (_, vertical) = render(TextStyle::default());
+        let (_, horizontal) = render(TextStyle {
+            vertical: false,
+            ..TextStyle::default()
+        });
+        assert_ne!(vertical, horizontal);
+        // 横書きでも、文字間・太字・斜体が効く
+        let plain = horizontal;
+        for (name, style) in [
+            (
+                "bold",
+                TextStyle {
+                    vertical: false,
+                    bold: true,
+                    ..TextStyle::default()
+                },
+            ),
+            (
+                "italic",
+                TextStyle {
+                    vertical: false,
+                    italic: true,
+                    ..TextStyle::default()
+                },
+            ),
+            (
+                "spacing",
+                TextStyle {
+                    vertical: false,
+                    letter_spacing: 30,
+                    ..TextStyle::default()
+                },
+            ),
+        ] {
+            assert_ne!(plain, render(style).1, "{name}");
+        }
+    }
+
     /// 文字色と背景色が、描いたページに反映される
     #[test]
     fn page_uses_the_chosen_colors() {
@@ -610,6 +692,31 @@ fn gallery_of_styles() {
                 italic: true,
                 letter_spacing: 15,
                 line_spacing: 140,
+                ..TextStyle::default()
+            },
+        ),
+        (
+            "h_plain",
+            TextStyle {
+                vertical: false,
+                ..TextStyle::default()
+            },
+        ),
+        (
+            "h_wide",
+            TextStyle {
+                vertical: false,
+                letter_spacing: 20,
+                line_spacing: 200,
+                ..TextStyle::default()
+            },
+        ),
+        (
+            "h_bold_italic",
+            TextStyle {
+                vertical: false,
+                bold: true,
+                italic: true,
                 ..TextStyle::default()
             },
         ),

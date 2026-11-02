@@ -47,6 +47,8 @@ pub struct TextStyle {
     pub bold: bool,
     /// 斜体（フォントに斜体が無いため、傾けて描く）
     pub italic: bool,
+    /// 縦書き（false なら横書き）
+    pub vertical: bool,
 }
 
 impl Default for TextStyle {
@@ -60,6 +62,7 @@ impl Default for TextStyle {
             letter_spacing: 0,
             bold: false,
             italic: false,
+            vertical: true,
         }
     }
 }
@@ -132,7 +135,8 @@ mod tests {
                 paper: DEFAULT_PAPER,
                 letter_spacing: 0,
                 bold: false,
-                italic: false
+                italic: false,
+                vertical: true
             }
         );
         // 欠けている項目は既定値

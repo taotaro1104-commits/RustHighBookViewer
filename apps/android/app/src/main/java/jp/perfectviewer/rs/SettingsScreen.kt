@@ -116,7 +116,7 @@ fun SettingsScreen(state: AppState) {
         }
 
         Section("文章の本（EPUB）") {
-            Note("画像の無い文章の EPUB を、縦書きで表示するときの見た目です。変更は、次に本を開いたときから反映されます（開いている本は、閲覧メニューの「文字」で開き直せます）。")
+            Note("画像の無い文章の EPUB を表示するときの見た目です。変更は、次に本を開いたときから反映されます（開いている本は、閲覧メニューの「文字」で開き直せます）。")
             var text by remember { mutableStateOf(state.core.textStyle()) }
             val faces = remember { state.core.availableTypefaces() }
             fun updateText(next: uniffi.pv_ffi.PvTextStyle) {
@@ -126,6 +126,10 @@ fun SettingsScreen(state: AppState) {
                         .onFailure { e -> withContext(Dispatchers.Main) { state.toast(Tr.f("設定を保存できません: {1}", e.message)) } }
                 }
             }
+            Choice(
+                "文字の向き", text.vertical,
+                listOf(true to "縦書き", false to "横書き"),
+            ) { updateText(text.copy(vertical = it)) }
             Choice("書体", text.typeface, faces.map { it to typefaceLabel(it) }) { updateText(text.copy(typeface = it)) }
             Choice(
                 "文字の大きさ", text.size.toInt(),
