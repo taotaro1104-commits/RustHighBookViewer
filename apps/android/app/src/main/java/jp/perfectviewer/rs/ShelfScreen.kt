@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as listItems
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.Button
@@ -46,12 +47,14 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import uniffi.pv_ffi.PvBook
+import uniffi.pv_ffi.PvFolderView
+import uniffi.pv_ffi.sortBooks
 import uniffi.pv_ffi.PvGroup
 import uniffi.pv_ffi.PvSort
 import uniffi.pv_ffi.PvStatus
 
 /** 本棚のタブ。選んだタブは AppState に覚えておき、本を閉じたときに開く前の状態へ戻す。 */
-enum class ShelfTab(val label: String) { RECENT("履歴"), ALL("すべて"), FAVORITES("お気に入り"), GROUPS("グループ") }
+enum class ShelfTab(val label: String) { RECENT("履歴"), ALL("すべて"), FAVORITES("お気に入り"), GROUPS("グループ"), FOLDERS("フォルダ") }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -65,18 +68,30 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
     var addTarget by remember { mutableStateOf<List<Long>?>(null) }
     fun stopSelecting() { selecting = false; selected.clear() }
 
-    val books by produceState(emptyList<PvBook>(), tab, query, group, state.shelfVersion, state.shelfSort) {
+    // 「フォルダ」タブ: 指定したフォルダの直下（または配下すべて）の本と、サブフォルダ
+    val folderView by produceState<PvFolderView?>(
+        null, tab, state.shelfFolder, state.shelfFolderRecursive, state.shelfVersion, state.shelfSort,
+    ) {
+        value = if (tab != ShelfTab.FOLDERS) null else withContext(Dispatchers.IO) {
+            runCatching { state.core.browseLibrary(state.shelfFolder, state.shelfFolderRecursive, state.shelfSort) }.getOrNull()
+        }
+    }
+
+    val books by produceState(emptyList<PvBook>(), tab, query, group, state.shelfVersion, state.shelfSort, state.shelfSortDesc, state.shelfStatus, folderView) {
         value = withContext(Dispatchers.IO) {
             runCatching {
-                when {
-                    group != null -> state.core.groupBooks(group.id)
-                        .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
-                    tab == ShelfTab.RECENT -> state.core.recentBooks(200u)
-                        .filter { query.isBlank() || it.title.contains(query, ignoreCase = true) }
+                val matches = { b: PvBook -> query.isBlank() || b.title.contains(query, ignoreCase = true) }
+                val list = when {
+                    tab == ShelfTab.FOLDERS -> (folderView?.books ?: emptyList()).filter(matches)
+                    group != null -> state.core.groupBooks(group.id).filter(matches)
+                    tab == ShelfTab.RECENT -> state.core.recentBooks(200u).filter(matches)
                     tab == ShelfTab.ALL -> state.core.listBooks(query, false, state.shelfSort)
                     tab == ShelfTab.FAVORITES -> state.core.listBooks(query, true, state.shelfSort)
                     else -> emptyList()
                 }
+                // どのタブでも、選んだ並び順（キーと向き）で並べる
+                val status = state.shelfStatus
+                sortBooks(list, state.shelfSort, state.shelfSortDesc).filter { status == null || it.status == status }
             }.getOrDefault(emptyList())
         }
     }
@@ -95,6 +110,10 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
     }
     BackHandler(enabled = selecting) { stopSelecting() }
     BackHandler(enabled = !selecting && group != null) { state.shelfGroup = null; state.shelfScrollToTop = true }
+    // フォルダ表示では、戻るキーで 1 つ上のフォルダへ
+    BackHandler(enabled = !selecting && tab == ShelfTab.FOLDERS && state.shelfFolder.isNotEmpty()) {
+        state.shelfFolder = parentFolder(state.shelfFolder); state.shelfScrollToTop = true
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         Row(
@@ -116,6 +135,7 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
             TextButton(onClick = { state.updateShelfAsList(!state.shelfAsList) }) {
                 Text(if (state.shelfAsList) "▦ サムネイル表示" else "☰ 名前の一覧")
             }
+            SortMenu(state)
             ShelfTab.entries.forEach { t ->
                 FilterChip(selected = tab == t, onClick = {
                     state.shelfTab = t
@@ -134,6 +154,7 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
         } else if (group != null) {
             GroupHeader(state, group)
         }
+        if (tab == ShelfTab.FOLDERS && !selecting) FolderHeader(state)
         OutlinedTextField(
             value = query,
             onValueChange = { state.shelfQuery = it },
@@ -141,9 +162,10 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
             label = { Text("タイトル検索") },
             modifier = Modifier.fillMaxWidth(),
         )
+        if (!(tab == ShelfTab.GROUPS && group == null)) StatusFilter(state)
         if (tab == ShelfTab.GROUPS && group == null) {
             GroupGrid(state, groups, onOpen = { state.shelfGroup = it; state.shelfScrollToTop = true })
-        } else if (books.isEmpty()) {
+        } else if (books.isEmpty() && !(tab == ShelfTab.FOLDERS && (folderView?.folders?.isNotEmpty() == true))) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("本がありません。「ファイル」から ZIP / CBZ / 7z / RAR / EPUB を、「フォルダ」から画像フォルダを選んでください。")
             }
@@ -154,6 +176,11 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
             }
             if (state.shelfAsList) {
                 LazyColumn(Modifier.fillMaxSize().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (tab == ShelfTab.FOLDERS) {
+                        listItems(folderView?.folders ?: emptyList(), key = { "dir:" + it.path }) { f ->
+                            FolderRow(f) { state.shelfFolder = f.path; state.shelfScrollToTop = true }
+                        }
+                    }
                     listItems(books, key = { it.id }) { book ->
                         BookRow(
                             state, book, group, selecting, selected.contains(book.id),
@@ -171,6 +198,13 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    if (tab == ShelfTab.FOLDERS) {
+                        items(
+                            folderView?.folders ?: emptyList(),
+                            key = { "dir:" + it.path },
+                            span = { GridItemSpan(maxLineSpan) },
+                        ) { f -> FolderRow(f) { state.shelfFolder = f.path; state.shelfScrollToTop = true } }
+                    }
                     items(books, key = { it.id }) { book ->
                         BookCard(
                             state, book, group, selecting, selected.contains(book.id),

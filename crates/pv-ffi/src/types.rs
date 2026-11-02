@@ -267,6 +267,10 @@ pub struct PvBook {
     pub status: PvStatus,
     pub favorite: bool,
     pub last_opened_at: Option<i64>,
+    /// ライブラリに登録した日時（ミリ秒）
+    pub added_at: i64,
+    /// 本のサイズ（バイト）。フォルダの本は中の画像の合計
+    pub size: u64,
 }
 
 /// 文章の EPUB の書体
@@ -312,6 +316,24 @@ pub struct PvTextStyle {
     pub italic: bool,
     /// 縦書き（false なら横書き）
     pub vertical: bool,
+}
+
+/// 本棚の「フォルダ」表示のサブフォルダ
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PvFolderEntry {
+    /// 見せる名前（指定したフォルダからの相対）
+    pub name: String,
+    /// 絶対パス
+    pub path: String,
+    /// 配下の本の数
+    pub count: u32,
+}
+
+/// 指定したフォルダの中身: サブフォルダと、表示する本
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PvFolderView {
+    pub folders: Vec<PvFolderEntry>,
+    pub books: Vec<PvBook>,
 }
 
 /// 本をまとめたグループ（シリーズ・フォルダ単位など）
@@ -539,6 +561,8 @@ impl From<&Book> for PvBook {
             status: b.status.into(),
             favorite: b.favorite,
             last_opened_at: b.last_opened_at,
+            added_at: b.added_at,
+            size: b.size,
         }
     }
 }

@@ -168,6 +168,19 @@ internal val TRANSLATIONS: Map<String, List<String>> = buildMap {
     e("お気に入りにする", "Add to favorites", "加入收藏", "즐겨찾기에 추가", "Añadir a favoritos")
     e("ライブラリから削除", "Delete from library", "从库中删除", "라이브러리에서 삭제", "Eliminar de la biblioteca")
 
+    // --- フォルダ表示（ShelfFolders）
+    e("配下すべて表示", "Include subfolders", "显示所有子文件夹内容", "하위 폴더까지 모두 표시", "Incluir subcarpetas")
+    // --- 並び替え・読書状況（ShelfSort）
+    e("未読", "Unread", "未读", "읽지 않음", "Sin leer")
+    e("読書中", "Reading", "阅读中", "읽는 중", "Leyendo")
+    e("既読", "Finished", "已读", "읽음", "Terminado")
+    e("並び替え: {1} {2}", "Sort: {1} {2}", "排序：{1} {2}", "정렬: {1} {2}", "Orden: {1} {2}")
+    e("昇順にする（古い・小さい順）", "Ascending (oldest / smallest first)", "升序（旧的、小的在前）", "오름차순 (오래된 순·작은 순)", "Ascendente (más antiguos / pequeños primero)")
+    e("降順にする（新しい・大きい順）", "Descending (newest / largest first)", "降序（新的、大的在前）", "내림차순 (최신 순·큰 순)", "Descendente (más recientes / grandes primero)")
+    e("並び順", "Sort order", "排序方式", "정렬 순서", "Criterio de orden")
+    e("並びの向き", "Sort direction", "排序方向", "정렬 방향", "Sentido del orden")
+    e("昇順", "Ascending", "升序", "오름차순", "Ascendente")
+    e("降順", "Descending", "降序", "내림차순", "Descendente")
     // --- グループ（ShelfGroups）
     e("グループがありません。本を長押しして「グループに追加」するか、複数の本が入ったフォルダを読み込むと作られます。", "No groups yet. Long-press a book and choose “Add to group”, or import a folder that contains several books.", "还没有分组。长按书籍选择“加入分组”，或导入包含多本书的文件夹即可创建。", "그룹이 없습니다. 책을 길게 눌러 “그룹에 추가”하거나, 여러 권이 들어 있는 폴더를 불러오면 만들어집니다.", "Aún no hay grupos. Mantén pulsado un libro y elige «Añadir al grupo», o importa una carpeta con varios libros.")
     e("{1} 冊", "{1} books", "{1} 本", "{1}권", "{1} libros")

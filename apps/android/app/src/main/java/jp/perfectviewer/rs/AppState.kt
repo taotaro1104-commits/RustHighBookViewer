@@ -37,6 +37,7 @@ import uniffi.pv_ffi.PvException
 import uniffi.pv_ffi.PvReader
 import uniffi.pv_ffi.PvTextStyle
 import uniffi.pv_ffi.PvSort
+import uniffi.pv_ffi.PvStatus
 
 private const val DESTROY_DELAY_MS = 600L
 private const val FILE_PREFIX = "file://"
@@ -45,6 +46,14 @@ private const val KEY_BROWSE_DIR = "browse_dir"
 private const val KEY_VOLUME_KEYS = "volume_keys"
 private const val KEY_KEEP_SCREEN = "keep_screen"
 private const val KEY_SHELF_SORT = "shelf_sort"
+private const val KEY_SESSION_BOOK = "session_book"
+private const val KEY_SESSION_MENU = "session_menu"
+private const val KEY_SESSION_TAB = "session_tab"
+private const val KEY_SESSION_FOLDER = "session_folder"
+private const val KEY_SESSION_RECURSIVE = "session_recursive"
+private const val KEY_SESSION_STATUS = "session_status"
+private const val KEY_SESSION_QUERY = "session_query"
+private const val KEY_SHELF_SORT_DESC = "shelf_sort_desc"
 private const val KEY_SHELF_LIST = "shelf_list"
 private const val KEY_LANGUAGE = "language"
 
@@ -110,6 +119,23 @@ class AppState private constructor(private val context: Context) {
     /** 開いているグループ。null ならグループの外 */
     var shelfGroup: PvGroup? by mutableStateOf(null)
 
+    /** 「フォルダ」タブで開いているフォルダ（絶対パス）。空ならいちばん上 */
+    var shelfFolder by mutableStateOf("")
+
+    /** 「フォルダ」タブで、サブフォルダの本も含めて（配下すべて）表示するか */
+    var shelfFolderRecursive by mutableStateOf(false)
+
+    /** 閲覧中のメニュー（上下のバー）が出ているか。画面が作り直されても、バックグラウンドから戻っても保つ */
+    var readerMenu by mutableStateOf(false)
+
+    /** 読書状況での絞り込み（null = すべて） */
+    var shelfStatus: PvStatus? by mutableStateOf(null)
+
+    init {
+        // 本棚のタブ・フォルダ・絞り込みは、前回の終了時のまま始める
+        restoreShelf()
+    }
+
     /** 本棚のスクロール位置 */
     val shelfGrid = LazyGridState()
 
@@ -146,6 +172,12 @@ class AppState private constructor(private val context: Context) {
     )
         private set
 
+    /** 並び順が降順か。名前は昇順（あ→ん）、日付・サイズは新しい・大きい順が既定 */
+    var shelfSortDesc by mutableStateOf(
+        if (prefs.contains(KEY_SHELF_SORT_DESC)) prefs.getBoolean(KEY_SHELF_SORT_DESC, false) else shelfSort != PvSort.NAME,
+    )
+        private set
+
     val versionName: String = runCatching {
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
     }.getOrNull() ?: ""
@@ -160,9 +192,18 @@ class AppState private constructor(private val context: Context) {
         prefs.edit().putBoolean(KEY_KEEP_SCREEN, v).apply()
     }
 
+    /** 並び順のキーを変える。向きは、そのキーの既定（名前は昇順、それ以外は降順）に戻す */
     fun updateShelfSort(v: PvSort) {
         shelfSort = v
-        prefs.edit().putString(KEY_SHELF_SORT, v.name).apply()
+        shelfSortDesc = v != PvSort.NAME
+        prefs.edit().putString(KEY_SHELF_SORT, v.name).putBoolean(KEY_SHELF_SORT_DESC, shelfSortDesc).apply()
+        shelfScrollToTop = true
+    }
+
+    fun updateShelfSortDesc(desc: Boolean) {
+        shelfSortDesc = desc
+        prefs.edit().putBoolean(KEY_SHELF_SORT_DESC, desc).apply()
+        shelfScrollToTop = true
     }
 
     /** 「開く」をユーザーが中断した。エラー表示を出さないための印 */
@@ -331,6 +372,7 @@ class AppState private constructor(private val context: Context) {
             afterOpen = null
             val old = reader
             reader = opened
+            readerMenu = pendingMenu ?: false
             old?.let { release(it) } // 閲覧中に別の本を開いた場合、旧 reader を残さない
         } catch (e: CancellationException) {
             throw e // 呼び出し元の取り消しはエラーではない（表示しない）
@@ -353,9 +395,57 @@ class AppState private constructor(private val context: Context) {
     fun close() {
         val r = reader ?: return
         reader = null
+        readerMenu = false
+        prefs.edit().remove(KEY_SESSION_BOOK).putBoolean(KEY_SESSION_MENU, false).apply() // 自分で閉じた本は、次回は開き直さない
         release(r)
         shelfVersion++
     }
+
+    /**
+     * 今の状態（開いている本・メニュー・本棚のタブや絞り込み）を保存する。バックグラウンドへ移るときに呼ぶ。
+     * 他のアプリを使っている間にシステムがこのアプリを終了しても、戻ったときに続きから再開できる。
+     */
+    fun persistSession() {
+        val r = reader
+        prefs.edit()
+            .putString(KEY_SESSION_BOOK, r?.uri() ?: "")
+            .putBoolean(KEY_SESSION_MENU, r != null && readerMenu)
+            .putString(KEY_SESSION_TAB, shelfTab.name)
+            .putString(KEY_SESSION_FOLDER, shelfFolder)
+            .putBoolean(KEY_SESSION_RECURSIVE, shelfFolderRecursive)
+            .putString(KEY_SESSION_STATUS, shelfStatus?.name ?: "")
+            .putString(KEY_SESSION_QUERY, shelfQuery)
+            .apply()
+    }
+
+    /** 保存した本棚の状態を戻す（起動時に 1 度）。 */
+    private fun restoreShelf() {
+        runCatching { ShelfTab.valueOf(prefs.getString(KEY_SESSION_TAB, null) ?: "") }.getOrNull()?.let { shelfTab = it }
+        shelfFolder = prefs.getString(KEY_SESSION_FOLDER, "") ?: ""
+        shelfFolderRecursive = prefs.getBoolean(KEY_SESSION_RECURSIVE, false)
+        shelfStatus = runCatching { PvStatus.valueOf(prefs.getString(KEY_SESSION_STATUS, null) ?: "") }.getOrNull()
+        shelfQuery = prefs.getString(KEY_SESSION_QUERY, "") ?: ""
+    }
+
+    private var sessionRestored = false
+
+    /**
+     * 前回、本を開いたままバックグラウンドへ移ってアプリが終了していたら、その本を同じページ・同じメニューの状態で開き直す。
+     * すでに本を開いている（プロセスが生きている）ときや、起動のたびに 2 回目以降は何もしない。
+     */
+    suspend fun restoreSession() {
+        if (sessionRestored) return
+        sessionRestored = true
+        if (reader != null) return
+        val uri = prefs.getString(KEY_SESSION_BOOK, null)?.takeIf { it.isNotBlank() } ?: return
+        pendingMenu = prefs.getBoolean(KEY_SESSION_MENU, false)
+        openBook(uri)
+        pendingMenu = null
+        if (reader == null) prefs.edit().remove(KEY_SESSION_BOOK).apply() // 開けなかった本を、毎回試さない
+    }
+
+    /** 開き直した本に、保存しておいたメニューの状態を使うための一時的な値 */
+    private var pendingMenu: Boolean? = null
 
     private fun release(r: PvReader) {
         runCatching { r.saveProgress(true) }

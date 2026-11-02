@@ -107,12 +107,16 @@ fun SettingsScreen(state: AppState) {
 
         Section("本棚") {
             Choice(
-                "「すべて」「お気に入り」の並び順", state.shelfSort,
+                "並び順", state.shelfSort,
                 listOf(
                     PvSort.NAME to "名前", PvSort.LAST_OPENED to "最近開いた順",
                     PvSort.ADDED to "追加順", PvSort.SIZE to "サイズ",
                 ),
             ) { state.updateShelfSort(it) }
+            Choice(
+                "並びの向き", state.shelfSortDesc,
+                listOf(false to "昇順", true to "降順"),
+            ) { state.updateShelfSortDesc(it) }
         }
 
         Section("文章の本（EPUB）") {

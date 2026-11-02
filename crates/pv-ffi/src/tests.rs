@@ -712,3 +712,100 @@ fn text_style_changes_pages_after_reopen_and_persists() {
     assert!(!saved.vertical, "横書きの設定が保存される");
     assert!(core.available_typefaces().contains(&PvTypeface::Gothic));
 }
+
+#[test]
+fn browse_library_follows_where_books_were_opened_from() {
+    let (d, core, cbz) = setup(1);
+    let sub = d.path().join("sub");
+    std::fs::create_dir_all(&sub).unwrap();
+    let cbz2 = sub.join("Vol 2.cbz");
+    make_cbz(&cbz2, 2);
+    core.clone().open_path(cbz).unwrap();
+    core.clone()
+        .open_path(cbz2.to_string_lossy().into_owned())
+        .unwrap();
+
+    let root = d.path().to_string_lossy().replace('\\', "/");
+    let top = core
+        .browse_library(root.clone(), false, PvSort::Name)
+        .unwrap();
+    assert_eq!(top.books.len(), 1, "直下は Vol 1 だけ");
+    assert_eq!(top.folders.len(), 1);
+    assert_eq!(
+        (top.folders[0].name.as_str(), top.folders[0].count),
+        ("sub", 1)
+    );
+
+    let all = core.browse_library(root, true, PvSort::Name).unwrap();
+    assert_eq!(all.books.len(), 2);
+    let inner = core
+        .browse_library(top.folders[0].path.clone(), false, PvSort::Name)
+        .unwrap();
+    assert_eq!(inner.books.len(), 1);
+    assert_eq!(inner.books[0].title, "Vol 2");
+}
+
+fn book(id: i64, title: &str, opened: Option<i64>, added: i64, size: u64) -> PvBook {
+    PvBook {
+        id,
+        uri: format!("file:///b/{id}"),
+        title: title.into(),
+        page_count: 1,
+        status: PvStatus::Unread,
+        favorite: false,
+        last_opened_at: opened,
+        added_at: added,
+        size,
+    }
+}
+
+#[test]
+fn books_sort_by_name_date_and_size_in_both_directions() {
+    let books = vec![
+        book(1, "第10巻", Some(30), 300, 50),
+        book(2, "第2巻", None, 100, 90),
+        book(3, "第1巻", Some(10), 200, 70),
+    ];
+    let titles = |sort, desc| -> Vec<String> {
+        sort_books(books.clone(), sort, desc)
+            .into_iter()
+            .map(|b| b.title)
+            .collect()
+    };
+    // 名前は自然順（2 が 10 より前）
+    assert_eq!(titles(PvSort::Name, false), ["第1巻", "第2巻", "第10巻"]);
+    assert_eq!(titles(PvSort::Name, true), ["第10巻", "第2巻", "第1巻"]);
+    // 登録日
+    assert_eq!(titles(PvSort::Added, false), ["第2巻", "第1巻", "第10巻"]);
+    assert_eq!(titles(PvSort::Added, true), ["第10巻", "第1巻", "第2巻"]);
+    // 最近開いた順: 開いていない本は、昇順で先頭・降順で最後
+    assert_eq!(
+        titles(PvSort::LastOpened, true),
+        ["第10巻", "第1巻", "第2巻"]
+    );
+    assert_eq!(
+        titles(PvSort::LastOpened, false),
+        ["第2巻", "第1巻", "第10巻"]
+    );
+    // サイズ
+    assert_eq!(titles(PvSort::Size, false), ["第10巻", "第1巻", "第2巻"]);
+    assert_eq!(titles(PvSort::Size, true), ["第2巻", "第1巻", "第10巻"]);
+}
+
+#[test]
+fn equal_sort_keys_fall_back_to_name_then_id() {
+    let books = vec![
+        book(5, "b", None, 1, 1),
+        book(4, "a", None, 1, 1),
+        book(3, "a", None, 1, 1),
+    ];
+    let ids = |desc| -> Vec<i64> {
+        sort_books(books.clone(), PvSort::Added, desc)
+            .into_iter()
+            .map(|b| b.id)
+            .collect()
+    };
+    // 同じ値の本の並びは、昇順・降順で変わらない
+    assert_eq!(ids(false), [3, 4, 5]);
+    assert_eq!(ids(true), [3, 4, 5]);
+}

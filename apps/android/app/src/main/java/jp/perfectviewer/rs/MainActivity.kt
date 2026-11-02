@@ -43,6 +43,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         state = AppState.get(applicationContext)
         handleIntent(intent)
+        // 他のアプリを使っている間にアプリが終了していたら、開いていた本を続きから開き直す
+        if (intent?.action != Intent.ACTION_VIEW) lifecycleScope.launch { state.restoreSession() }
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
@@ -177,5 +179,6 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         state.reader?.let { runCatching { it.saveProgress(true) } }
+        state.persistSession()
     }
 }

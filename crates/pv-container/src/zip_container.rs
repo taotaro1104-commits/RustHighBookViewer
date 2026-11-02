@@ -34,15 +34,17 @@ impl ContainerProvider for ZipProvider {
 
     fn open(&self, src: Arc<dyn Source>) -> Result<Arc<dyn Container>> {
         let zip = ZipContainer::open(src, self.limits.unwrap_or_default())?;
-        // EPUB（コミック・写真集）なら、spine の順に画像を並べる。読めなければ通常の ZIP として扱う
-        Ok(match EpubContainer::from_zip(zip) {
-            Ok(epub) => Arc::new(epub),
-            // 画像の無い EPUB は、文章の本として読む（フォントが無ければエラー）
-            Err(zip) => match TextEpubContainer::try_open_with(zip, self.text_style)? {
+        // 本文のある EPUB は文章と画像を、コミック・写真集は画像を、spine の順に並べる。読めなければ通常の ZIP として扱う
+        Ok(
+            match TextEpubContainer::try_open_with(zip, self.text_style)? {
+                // 本文のある EPUB（画像の無いもの・画像と文章が混ざったもの）は、文章と画像を読む順に並べる
                 Ok(text) => Arc::new(text),
-                Err(zip) => Arc::new(zip),
+                Err(zip) => match EpubContainer::from_zip(zip) {
+                    Ok(epub) => Arc::new(epub),
+                    Err(zip) => Arc::new(zip),
+                },
             },
-        })
+        )
     }
 }
 

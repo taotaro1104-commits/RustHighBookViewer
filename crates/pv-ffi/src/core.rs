@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use pv_container::{
-    kind_from_path, open_source_styled, scan_books, EntryKind, ExtractGuard, FolderContainer,
-    ScanKind,
+    kind_from_path, natural_cmp, open_source_styled, scan_books, EntryKind, ExtractGuard,
+    FolderContainer, ScanKind,
 };
 use pv_core::{
     make_thumbnail_from, BookOverride, BookSession, Container, DiskCache, FileSource, Settings,
@@ -279,6 +279,31 @@ impl PvCore {
             .map_err(PvError::new)
     }
 
+    /// 指定したフォルダの中身（登録済みの本の場所から作る）。`prefix` が空ならいちばん上。
+    /// `recursive` なら、配下のすべての本を `books` に入れる（そうでなければ直下の本だけ）。
+    pub fn browse_library(
+        &self,
+        prefix: String,
+        recursive: bool,
+        sort: PvSort,
+    ) -> PvResult<PvFolderView> {
+        let books = self.list_books(String::new(), false, sort)?;
+        let uris: Vec<String> = books.iter().map(|b| b.uri.clone()).collect();
+        let v = crate::folders::view(&uris, &prefix, recursive);
+        Ok(PvFolderView {
+            folders: v
+                .folders
+                .into_iter()
+                .map(|e| PvFolderEntry {
+                    name: e.name,
+                    path: e.path,
+                    count: e.count as u32,
+                })
+                .collect(),
+            books: v.shown.into_iter().map(|i| books[i].clone()).collect(),
+        })
+    }
+
     /// グループの一覧（名前順）。
     pub fn groups(&self) -> PvResult<Vec<PvGroup>> {
         let rows = self.library.shelves_with_counts().map_err(PvError::new)?;
@@ -542,6 +567,30 @@ impl PvCore {
             },
         )))
     }
+}
+
+/// 本の一覧を並べ替える（どのタブの一覧にも使う）。
+/// `sort` のキーで並べ、`descending` なら逆順。同じ値の本は、名前（自然順）、登録順の順に並べる。
+/// 一度も開いていない本は、「最近開いた順」では最後（降順のとき）または最初（昇順のとき）に来る。
+#[uniffi::export]
+pub fn sort_books(mut books: Vec<PvBook>, sort: PvSort, descending: bool) -> Vec<PvBook> {
+    books.sort_by(|a, b| {
+        let primary = match sort {
+            PvSort::Name => natural_cmp(&a.title, &b.title),
+            PvSort::LastOpened => a.last_opened_at.cmp(&b.last_opened_at),
+            PvSort::Added => a.added_at.cmp(&b.added_at),
+            PvSort::Size => a.size.cmp(&b.size),
+        };
+        let primary = if descending {
+            primary.reverse()
+        } else {
+            primary
+        };
+        primary
+            .then_with(|| natural_cmp(&a.title, &b.title))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    books
 }
 
 /// 拡張子から画像ファイルか判定する（フォルダの閲覧画面で、画像のあるフォルダを見分けるため）。

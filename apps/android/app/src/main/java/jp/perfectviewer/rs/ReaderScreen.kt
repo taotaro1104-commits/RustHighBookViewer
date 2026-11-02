@@ -69,7 +69,8 @@ private data class FrameKey(val spread: Int, val w: Int, val h: Int, val scale: 
 @Composable
 fun ReaderScreen(state: AppState, reader: PvReader) {
     val scope = rememberCoroutineScope()
-    var uiVisible by remember { mutableStateOf(false) }
+    // メニューの表示は AppState に持つ（画面が作り直されても、バックグラウンドから戻っても保たれる）
+    var uiVisible by state::readerMenu
     var page by remember { mutableIntStateOf(reader.currentPage().toInt()) }
     var layout by remember { mutableStateOf(reader.layout()) }
     var zoomLevel by remember { mutableFloatStateOf(1f) }

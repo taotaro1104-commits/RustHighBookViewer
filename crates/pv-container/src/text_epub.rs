@@ -11,7 +11,7 @@ use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
 use bytes::Bytes;
 
 use crate::container::Container;
-use crate::entry::{EntryId, EntryKind, EntryMeta};
+use crate::entry::{kind_from_path, EntryId, EntryKind, EntryMeta};
 use crate::epub::{
     dir_of, is_markup, parse_xml, read_text, resolve, rootfile_path, Item, PathIndex,
     CONTAINER_XML, MAX_SPINE,
@@ -31,27 +31,62 @@ const FOOTER_PX: f32 = 28.0;
 /// エントリの大きさの目安（実際の PNG の大きさではない。展開サイズの上限判定などに使われるだけ）
 const NOMINAL_SIZE: u64 = 80_000;
 
+/// 1 ページの中身
+enum PageKind {
+    /// 文章のページ（開くときに割り付け、読み出し時に描く）
+    Text(Page),
+    /// 画像のページ（EPUB 内の画像をそのまま返す）
+    Image(EntryId),
+}
+
+/// 画像のある EPUB で、これ以上の本文（文字数）があれば、画像と文章の混在した本として読む。
+/// これ未満なら、コミック・写真集として画像だけを並べる（見出しや注記が少しあるだけの本のため）。
+const MIXED_MIN_CHARS: usize = 300;
+
 pub struct TextEpubContainer {
+    zip: ZipContainer,
     entries: Vec<EntryMeta>,
-    pages: Vec<Page>,
+    pages: Vec<PageKind>,
     spec: PageSpec,
     font: Arc<FontVec>,
     style: TextStyle,
 }
 
 impl TextEpubContainer {
-    /// 文章の EPUB なら成功する。EPUB でない・本文が無いときは ZIP をそのまま返す。
-    /// 文章の EPUB なのに日本語フォントが見つからないときだけエラー。
+    /// 文章の EPUB（画像の混ざったものを含む）なら成功する。EPUB でない・本文が無い・
+    /// 画像が中心のコミックのときは ZIP をそのまま返す（呼び出し側が画像の本として開く）。
+    /// 文章の EPUB なのに日本語フォントが見つからないときは、画像の無い本ならエラー、
+    /// 画像のある本なら画像だけの本として扱う。
     /// 見た目（文字の大きさ・書体）を指定して開く。
     pub fn try_open_with(
         zip: ZipContainer,
         style: TextStyle,
     ) -> Result<std::result::Result<Self, ZipContainer>> {
         let chapters = spine_chapters(&zip);
-        if chapters.iter().all(Vec::is_empty) {
+        let images = chapters
+            .iter()
+            .flatten()
+            .filter(|b| matches!(b, Block::Image(_)))
+            .count();
+        let chars: usize = chapters
+            .iter()
+            .flatten()
+            .map(|b| match b {
+                Block::Heading(_, t) | Block::Para { text: t, .. } => t.chars().count(),
+                _ => 0,
+            })
+            .sum();
+        if chapters.iter().all(Vec::is_empty) || (images > 0 && chars < MIXED_MIN_CHARS) {
             return Ok(Err(zip));
         }
-        let font = font_for(style.typeface).ok_or(ContainerError::NoFont)?;
+        let Some(font) = font_for(style.typeface) else {
+            // 画像のある本は、フォントが無くても画像だけで読めるようにする
+            return if images > 0 {
+                Ok(Err(zip))
+            } else {
+                Err(ContainerError::NoFont)
+            };
+        };
         let spec = PageSpec {
             font_px: style.font_px as f32,
             line_gap: style.line_spacing as f32 / 100.0,
@@ -66,19 +101,59 @@ impl TextEpubContainer {
                 .entry((c, size.to_bits()))
                 .or_insert_with(|| advance(&font, c, size))
         };
-        let pages = paginate(&chapters, spec, &adv);
+        let index = PathIndex::new(zip.entries());
+        // 文章は連続した範囲ごとに割り付け、画像は独立した 1 ページにして、読む順に並べる
+        let mut pages: Vec<PageKind> = Vec::new();
+        for chapter in &chapters {
+            let mut run: Vec<Block> = Vec::new();
+            let flush = |run: &mut Vec<Block>, pages: &mut Vec<PageKind>| {
+                if run.is_empty() {
+                    return;
+                }
+                let laid = paginate(std::slice::from_ref(run), spec, &adv);
+                pages.extend(laid.into_iter().map(PageKind::Text));
+                run.clear();
+            };
+            for b in chapter {
+                if let Block::Image(path) = b {
+                    flush(&mut run, &mut pages);
+                    if let Some(id) = index.get(path) {
+                        pages.push(PageKind::Image(id));
+                    }
+                } else {
+                    run.push(b.clone());
+                }
+            }
+            flush(&mut run, &mut pages);
+        }
         if pages.is_empty() {
             return Ok(Err(zip));
         }
-        let entries = (0..pages.len())
-            .map(|i| EntryMeta {
+        let mut entries = Vec::with_capacity(pages.len());
+        for (i, kind) in pages.iter().enumerate() {
+            let (path, size) = match kind {
+                PageKind::Text(_) => (format!("page_{:05}.png", i + 1), NOMINAL_SIZE),
+                PageKind::Image(zid) => {
+                    let m = &zip.entries()[zid.0 as usize];
+                    (
+                        format!(
+                            "{:05}_{}",
+                            i + 1,
+                            m.path.rsplit('/').next().unwrap_or("img")
+                        ),
+                        m.size,
+                    )
+                }
+            };
+            entries.push(EntryMeta {
                 id: EntryId(i as u32),
-                path: format!("page_{:05}.png", i + 1),
-                size: NOMINAL_SIZE,
+                path,
+                size,
                 kind: EntryKind::Image,
-            })
-            .collect();
+            });
+        }
         Ok(Ok(Self {
+            zip,
             entries,
             pages,
             spec,
@@ -87,14 +162,24 @@ impl TextEpubContainer {
         }))
     }
 
-    fn page(&self, id: EntryId) -> Result<&Page> {
+    fn kind(&self, id: EntryId) -> Result<&PageKind> {
         self.pages
             .get(id.0 as usize)
             .ok_or(ContainerError::NotFound(id.0))
     }
 
+    /// 文章のページ。画像のページなら None
+    fn text_page(&self, id: EntryId) -> Result<Option<&Page>> {
+        Ok(match self.kind(id)? {
+            PageKind::Text(p) => Some(p),
+            PageKind::Image(_) => None,
+        })
+    }
+
     fn render(&self, id: EntryId) -> Result<Vec<u8>> {
-        let page = self.page(id)?;
+        let Some(page) = self.text_page(id)? else {
+            return Err(ContainerError::NotFound(id.0));
+        };
         let (w, h) = (self.spec.width as usize, self.spec.height as usize);
         let mut buf = vec![0u8; w * h];
         for line in &page.lines {
@@ -317,7 +402,21 @@ fn spine_chapters(zip: &ZipContainer) -> Vec<Vec<Block>> {
             let path = resolve(base, &item.href)?;
             is_markup(item, &path).then_some(())?;
             let id = index.get(&path)?;
-            Some(parse_xhtml(&read_text(zip, id)?))
+            let dir = dir_of(&path).to_owned();
+            let blocks = parse_xhtml(&read_text(zip, id)?)
+                .into_iter()
+                .filter_map(|b| match b {
+                    // 参照を EPUB 内のパスにする。見つからない・画像でないものは捨てる
+                    Block::Image(src) => {
+                        let p = resolve(&dir, &src)?;
+                        let img = index.get(&p)?;
+                        (kind_from_path(&zip.entries()[img.0 as usize].path) == EntryKind::Image)
+                            .then(|| Block::Image(zip.entries()[img.0 as usize].path.clone()))
+                    }
+                    other => Some(other),
+                })
+                .collect();
+            Some(blocks)
         })
         .collect()
 }
@@ -328,7 +427,10 @@ impl Container for TextEpubContainer {
     }
 
     fn read(&self, id: EntryId) -> Result<Bytes> {
-        Ok(Bytes::from(self.render(id)?))
+        match self.kind(id)? {
+            PageKind::Text(_) => Ok(Bytes::from(self.render(id)?)),
+            PageKind::Image(zid) => self.zip.read(*zid),
+        }
     }
 
     fn is_text(&self) -> bool {
@@ -336,14 +438,21 @@ impl Container for TextEpubContainer {
     }
 
     fn read_prefix(&self, id: EntryId, n: usize) -> Result<Bytes> {
-        self.page(id)?;
-        let mut head = png_head(self.spec.width as u32, self.spec.height as u32);
-        head.truncate(n);
-        Ok(Bytes::from(head))
+        match self.kind(id)? {
+            PageKind::Text(_) => {
+                let mut head = png_head(self.spec.width as u32, self.spec.height as u32);
+                head.truncate(n);
+                Ok(Bytes::from(head))
+            }
+            PageKind::Image(zid) => self.zip.read_prefix(*zid, n),
+        }
     }
 
     fn open_reader(&self, id: EntryId) -> Result<Box<dyn Read + Send>> {
-        Ok(Box::new(Cursor::new(self.render(id)?)))
+        match self.kind(id)? {
+            PageKind::Text(_) => Ok(Box::new(Cursor::new(self.render(id)?))),
+            PageKind::Image(zid) => self.zip.open_reader(*zid),
+        }
     }
 }
 
@@ -511,6 +620,116 @@ mod tests {
         ] {
             assert_ne!(plain, render(style).1, "{name}");
         }
+    }
+
+    fn epub_with(chapters: &[(&str, String)], images: &[&str]) -> ZipContainer {
+        let container = r#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#;
+        let mut manifest = String::new();
+        let mut spine = String::new();
+        for (i, (name, _)) in chapters.iter().enumerate() {
+            manifest +=
+                &format!(r#"<item id="c{i}" href="{name}" media-type="application/xhtml+xml"/>"#);
+            spine += &format!(r#"<itemref idref="c{i}"/>"#);
+        }
+        let opf =
+            format!("<package><manifest>{manifest}</manifest><spine>{spine}</spine></package>");
+        let mut files: Vec<(String, Vec<u8>)> = vec![
+            (
+                "META-INF/container.xml".into(),
+                container.as_bytes().to_vec(),
+            ),
+            ("OEBPS/content.opf".into(), opf.into_bytes()),
+        ];
+        for (name, body) in chapters {
+            files.push((format!("OEBPS/{name}"), body.clone().into_bytes()));
+        }
+        for img in images {
+            files.push((format!("OEBPS/{img}"), format!("IMG:{img}").into_bytes()));
+        }
+        let mut z = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, data) in &files {
+            z.start_file(name, opts).unwrap();
+            z.write_all(data).unwrap();
+        }
+        let bytes = z.finish().unwrap().into_inner();
+        ZipContainer::open(
+            Arc::new(MemorySource(Bytes::from(bytes))),
+            Limits::default(),
+        )
+        .unwrap()
+    }
+
+    /// 画像と文章が混ざった EPUB は、文章のページと画像のページを、読む順に並べる
+    #[test]
+    fn mixed_epub_interleaves_text_pages_and_images_in_reading_order() {
+        if font_for(Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let body = |a: &str, img: &str, b: &str| {
+            format!(
+                "<html><body><h2>題</h2><p>{}</p><img src=\"{img}\"/><p>{}</p></body></html>",
+                a.repeat(300),
+                b.repeat(300)
+            )
+        };
+        let zip = epub_with(
+            &[
+                ("c1.xhtml", body("前の文です。", "p1.png", "後の文です。")),
+                (
+                    "c2.xhtml",
+                    "<html><body><img src=\"p2.png\"/></body></html>".to_owned(),
+                ),
+            ],
+            &["p1.png", "p2.png"],
+        );
+        let Ok(Ok(c)) = TextEpubContainer::try_open_with(zip, TextStyle::default()) else {
+            panic!("mixed epub should open as text + images");
+        };
+        let paths: Vec<&str> = c.entries().iter().map(|e| e.path.as_str()).collect();
+        let first_img = paths
+            .iter()
+            .position(|p| p.ends_with("p1.png"))
+            .expect("p1 present");
+        let second_img = paths
+            .iter()
+            .position(|p| p.ends_with("p2.png"))
+            .expect("p2 present");
+        assert!(first_img > 0, "画像の前に文章のページがある");
+        assert!(
+            second_img > first_img + 1,
+            "1 枚目の画像のあとにも文章のページがある"
+        );
+        assert_eq!(second_img, paths.len() - 1, "最後は 2 枚目の画像");
+        // 画像のページは元のバイト列、文章のページは PNG
+        assert_eq!(
+            &c.read(EntryId(first_img as u32)).unwrap()[..],
+            b"IMG:p1.png"
+        );
+        assert_eq!(&c.read(EntryId(0)).unwrap()[1..4], b"PNG");
+        assert_eq!(
+            &c.read_prefix(EntryId(second_img as u32), 4).unwrap()[..],
+            b"IMG:"
+        );
+        assert!(c.entries().iter().all(|e| e.kind == EntryKind::Image));
+    }
+
+    /// 本文がほとんど無い（見出し程度の）画像の EPUB は、コミックとして画像だけで読む
+    #[test]
+    fn picture_epubs_with_little_text_stay_image_only() {
+        let zip = epub_with(
+            &[(
+                "c1.xhtml",
+                "<html><body><h1>第1話</h1><img src=\"p1.png\"/></body></html>".to_owned(),
+            )],
+            &["p1.png"],
+        );
+        // フォントの有無にかかわらず、文章の本としては扱わない（呼び出し側が画像の本として開く）
+        assert!(matches!(
+            TextEpubContainer::try_open_with(zip, TextStyle::default()),
+            Ok(Err(_))
+        ));
     }
 
     /// 文字色と背景色が、描いたページに反映される

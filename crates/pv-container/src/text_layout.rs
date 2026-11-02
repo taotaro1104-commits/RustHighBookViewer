@@ -15,6 +15,8 @@ pub enum Block {
     Para { text: String, indent: bool },
     /// 空行（`<p><br/></p>` など）
     Blank,
+    /// 画像（XHTML に書かれた参照のまま。パスの解決は呼び出し側）。ページには割り付けない
+    Image(String),
 }
 
 /// ページ内の 1 行
@@ -140,6 +142,17 @@ impl Parser {
     }
 }
 
+/// `<img src="…">` や SVG の `<image href="…">` の参照先（タグの中身から取り出す）。
+fn image_src(tag_inner: &str) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r#"(?is)\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)')"#).expect("valid regex")
+    });
+    let c = re.captures(tag_inner)?;
+    let v = c.get(1).or_else(|| c.get(2))?.as_str().trim();
+    (!v.is_empty()).then(|| decode_entities(v))
+}
+
 /// XHTML から本文のブロックを取り出す。ルビ（`<rt>`）・スクリプト・スタイルは読み飛ばす。
 pub fn parse_xhtml(src: &str) -> Vec<Block> {
     static TOKEN: OnceLock<Regex> = OnceLock::new();
@@ -185,6 +198,15 @@ pub fn parse_xhtml(src: &str) -> Vec<Block> {
                 } else {
                     skip + 1
                 };
+            }
+            "img" | "image" if !closing => {
+                if in_body && skip == 0 {
+                    if let Some(src) = image_src(inner) {
+                        p.flush();
+                        p.cont = false;
+                        p.out.push(Block::Image(src));
+                    }
+                }
             }
             "br" => {
                 if in_body && skip == 0 {
@@ -371,6 +393,8 @@ pub fn paginate(chapters: &[Vec<Block>], spec: PageSpec, adv: Advance) -> Vec<Pa
         pg.new_page();
         for b in blocks {
             match b {
+                // 画像は呼び出し側が独立したページとして扱う（ここでは文章だけを割り付ける）
+                Block::Image(_) => {}
                 Block::Blank => {
                     if !pg.at_top() {
                         pg.used += spec.font_px * gap * 0.6;
@@ -670,5 +694,26 @@ mod tests {
             p[0].lines[0].text.chars().count()
         };
         assert!(first(1.0) > first(1.4));
+    }
+
+    #[test]
+    fn images_in_the_flow_are_picked_up_in_order() {
+        let x = r#"<html><body><p>前</p><div class="illust"><img src="img/a.png" alt="x"/></div>
+<p>後</p><svg><image xlink:href='../b.jpg'/></svg><img alt="no source"/></body></html>"#;
+        assert_eq!(
+            parse_xhtml(x),
+            vec![
+                Block::Para {
+                    text: "前".into(),
+                    indent: true
+                },
+                Block::Image("img/a.png".into()),
+                Block::Para {
+                    text: "後".into(),
+                    indent: true
+                },
+                Block::Image("../b.jpg".into()),
+            ]
+        );
     }
 }
