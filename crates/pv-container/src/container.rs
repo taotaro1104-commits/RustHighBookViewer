@@ -14,6 +14,16 @@ use crate::source::{FileSource, Source};
 use crate::text_style::TextStyle;
 use crate::zip_container::ZipProvider;
 
+/// 目次の 1 項目
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TocEntry {
+    pub title: String,
+    /// 移動先のページ（`entries()` の添字）
+    pub page: usize,
+    /// 階層の深さ（0 が最上位）
+    pub level: u8,
+}
+
 pub trait Container: Send + Sync {
     /// 自然順ソート済み
     fn entries(&self) -> &[EntryMeta];
@@ -22,6 +32,10 @@ pub trait Container: Send + Sync {
     /// 巨大エントリ用
     fn open_reader(&self, id: EntryId) -> Result<Box<dyn Read + Send>>;
     /// 先頭 `n` バイトだけ読む（画像ヘッダからの寸法取得用）。
+    /// 目次（EPUB の目次）。無ければ空。
+    fn toc(&self) -> Vec<TocEntry> {
+        Vec::new()
+    }
     /// 文章を描いたページでできた本か（見開きより単ページで読むのが向く）。
     fn is_text(&self) -> bool {
         false

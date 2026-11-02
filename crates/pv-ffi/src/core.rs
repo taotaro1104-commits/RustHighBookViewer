@@ -564,6 +564,15 @@ impl PvCore {
             ReaderInfo {
                 uri: uri_for_reader,
                 is_text: container.is_text(),
+                toc: container
+                    .toc()
+                    .into_iter()
+                    .map(|e| PvTocEntry {
+                        title: e.title,
+                        page: e.page as u32,
+                        level: u32::from(e.level),
+                    })
+                    .collect(),
             },
         )))
     }

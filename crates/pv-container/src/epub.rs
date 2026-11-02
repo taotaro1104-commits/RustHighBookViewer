@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 use bytes::Bytes;
 use regex::Regex;
 
-use crate::container::Container;
+use crate::container::{Container, TocEntry};
 use crate::entry::{kind_from_path, EntryId, EntryKind, EntryMeta};
 use crate::error::Result;
 use crate::zip_container::ZipContainer;
@@ -24,6 +24,7 @@ pub(crate) const MAX_SPINE: usize = 100_000;
 
 pub struct EpubContainer {
     zip: ZipContainer,
+    toc: Vec<TocEntry>,
     /// 読む順に並べた画像だけ
     entries: Vec<EntryMeta>,
     /// entries[i] に対応する、内側の ZIP でのエントリ
@@ -33,9 +34,15 @@ pub struct EpubContainer {
 impl EpubContainer {
     /// EPUB として画像を 1 枚以上たどれたときだけ成功する。そうでなければ ZIP をそのまま返す。
     pub fn from_zip(zip: ZipContainer) -> std::result::Result<Self, ZipContainer> {
-        let Some(order) = spine_images(&zip) else {
+        let Some((order, doc_start, shifted)) = spine_images(&zip) else {
             return Err(zip);
         };
+        // 目次の移動先（章の XHTML）→ その章の最初の画像のページ
+        let toc = toc_pages(
+            &zip,
+            |path| doc_start.get(path).map(|p| p + shifted),
+            order.len(),
+        );
         let entries = order
             .iter()
             .enumerate()
@@ -51,6 +58,7 @@ impl EpubContainer {
             .collect();
         Ok(Self {
             zip,
+            toc,
             entries,
             zip_ids: order,
         })
@@ -67,6 +75,10 @@ impl EpubContainer {
 impl Container for EpubContainer {
     fn entries(&self) -> &[EntryMeta] {
         &self.entries
+    }
+
+    fn toc(&self) -> Vec<TocEntry> {
+        self.toc.clone()
     }
 
     fn read(&self, id: EntryId) -> Result<Bytes> {
@@ -213,7 +225,8 @@ pub(crate) fn is_markup(item: &Item, path: &str) -> bool {
 }
 
 /// 読む順の画像。1 枚も無ければ None（EPUB として扱わない）。
-fn spine_images(zip: &ZipContainer) -> Option<Vec<EntryId>> {
+/// 戻り値: (読む順の画像, 章の XHTML のパス → 画像の列での最初の位置, 表紙を先頭に足したときのずれ)
+fn spine_images(zip: &ZipContainer) -> Option<(Vec<EntryId>, HashMap<String, usize>, usize)> {
     let index = PathIndex::new(zip.entries());
     let container = read_text(zip, index.get(CONTAINER_XML)?)?;
     let opf_path = rootfile_path(&container)?;
@@ -239,6 +252,7 @@ fn spine_images(zip: &ZipContainer) -> Option<Vec<EntryId>> {
     }
 
     let mut order: Vec<EntryId> = Vec::new();
+    let mut doc_start: HashMap<String, usize> = HashMap::new();
     let mut seen: HashSet<EntryId> = HashSet::new();
     let mut push = |id: EntryId, order: &mut Vec<EntryId>| {
         if seen.insert(id) {
@@ -260,6 +274,7 @@ fn spine_images(zip: &ZipContainer) -> Option<Vec<EntryId>> {
         let Some(id) = index.get(&path) else {
             continue;
         };
+        doc_start.entry(path.clone()).or_insert(order.len());
         if item.media_type.starts_with("image/") {
             push(id, &mut order);
         } else if is_markup(item, &path) {
@@ -301,12 +316,198 @@ fn spine_images(zip: &ZipContainer) -> Option<Vec<EntryId>> {
         .and_then(|href| resolve(base, href))
         .and_then(|p| index.get(&p))
         .filter(|id| kind_from_path(&zip.entries()[id.0 as usize].path) == EntryKind::Image);
+    let mut shifted = 0;
     if let Some(cover) = cover_id {
         if !order.contains(&cover) {
             order.insert(0, cover);
+            shifted = 1;
         }
     }
-    Some(order)
+    Some((order, doc_start, shifted))
+}
+
+/// 目次の 1 項目（読み取った直後の形）
+pub(crate) struct RawToc {
+    pub level: u8,
+    pub title: String,
+    /// 移動先の EPUB 内のパス（`#` 以降は除く）
+    pub path: String,
+}
+
+/// 目次の項目数の上限
+const MAX_TOC: usize = 5000;
+const MAX_TITLE_CHARS: usize = 200;
+
+fn element_text(n: roxmltree::Node) -> String {
+    let t: String = n
+        .descendants()
+        .filter(|d| d.is_text())
+        .filter_map(|d| d.text())
+        .collect();
+    let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+    t.chars().take(MAX_TITLE_CHARS).collect()
+}
+
+fn is_el(n: &roxmltree::Node, name: &str) -> bool {
+    n.is_element() && n.tag_name().name() == name
+}
+
+/// EPUB3 の目次（`<nav epub:type="toc">` の入れ子の `ol`/`li`/`a`）
+fn read_nav(text: &str, dir: &str) -> Vec<RawToc> {
+    let Some(doc) = parse_xml(text) else {
+        return Vec::new();
+    };
+    let navs: Vec<_> = doc.descendants().filter(|n| is_el(n, "nav")).collect();
+    let nav = navs
+        .iter()
+        .find(|n| {
+            n.attributes()
+                .any(|a| a.name() == "type" && a.value().split_whitespace().any(|v| v == "toc"))
+        })
+        .or_else(|| navs.first());
+    let Some(nav) = nav else {
+        return Vec::new();
+    };
+    fn walk(ol: roxmltree::Node, level: u8, dir: &str, out: &mut Vec<RawToc>) {
+        for li in ol.children().filter(|c| is_el(c, "li")) {
+            if let Some(a) = li.children().find(|c| is_el(c, "a")) {
+                let title = element_text(a);
+                if let (false, Some(path)) = (
+                    title.is_empty(),
+                    a.attribute("href").and_then(|h| resolve(dir, h)),
+                ) {
+                    if out.len() < MAX_TOC {
+                        out.push(RawToc { level, title, path });
+                    }
+                }
+            } else if let Some(span) = li.children().find(|c| is_el(c, "span")) {
+                // リンクの無い見出し（子の項目の見出しだけ）。項目としては出さず、階層だけ進める
+                let _ = span;
+            }
+            for sub in li.children().filter(|c| is_el(c, "ol")) {
+                walk(sub, level.saturating_add(1), dir, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(ol) = nav.descendants().find(|n| is_el(n, "ol")) {
+        walk(ol, 0, dir, &mut out);
+    }
+    out
+}
+
+/// EPUB2 の目次（NCX の `navMap` の入れ子の `navPoint`）
+fn read_ncx(text: &str, dir: &str) -> Vec<RawToc> {
+    let Some(doc) = parse_xml(text) else {
+        return Vec::new();
+    };
+    fn walk(point: roxmltree::Node, level: u8, dir: &str, out: &mut Vec<RawToc>) {
+        let label = point
+            .children()
+            .find(|c| is_el(c, "navLabel"))
+            .map(element_text)
+            .unwrap_or_default();
+        let src = point
+            .children()
+            .find(|c| is_el(c, "content"))
+            .and_then(|c| c.attribute("src"));
+        if let (false, Some(path)) = (label.is_empty(), src.and_then(|s| resolve(dir, s))) {
+            if out.len() < MAX_TOC {
+                out.push(RawToc {
+                    level,
+                    title: label,
+                    path,
+                });
+            }
+        }
+        for sub in point.children().filter(|c| is_el(c, "navPoint")) {
+            walk(sub, level.saturating_add(1), dir, out);
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(map) = doc.descendants().find(|n| is_el(n, "navMap")) {
+        for p in map.children().filter(|c| is_el(c, "navPoint")) {
+            walk(p, 0, dir, &mut out);
+        }
+    }
+    out
+}
+
+/// EPUB の目次を読む。EPUB3 の nav を先に、無ければ EPUB2 の NCX。無ければ空。
+pub(crate) fn parse_toc(zip: &ZipContainer) -> Vec<RawToc> {
+    let index = PathIndex::new(zip.entries());
+    let Some(container) = index.get(CONTAINER_XML).and_then(|id| read_text(zip, id)) else {
+        return Vec::new();
+    };
+    let Some(opf_path) = rootfile_path(&container) else {
+        return Vec::new();
+    };
+    let Some(opf_text) = index.get(&opf_path).and_then(|id| read_text(zip, id)) else {
+        return Vec::new();
+    };
+    let Some(opf) = parse_xml(&opf_text) else {
+        return Vec::new();
+    };
+    let base = dir_of(&opf_path);
+    let items: Vec<_> = opf.descendants().filter(|n| is_el(n, "item")).collect();
+    let load = |href: &str, read: fn(&str, &str) -> Vec<RawToc>| -> Vec<RawToc> {
+        let Some(path) = resolve(base, href) else {
+            return Vec::new();
+        };
+        let Some(text) = index.get(&path).and_then(|id| read_text(zip, id)) else {
+            return Vec::new();
+        };
+        read(&text, dir_of(&path))
+    };
+    let nav = items
+        .iter()
+        .find(|n| {
+            n.attribute("properties")
+                .is_some_and(|p| p.split_whitespace().any(|x| x == "nav"))
+        })
+        .and_then(|n| n.attribute("href"))
+        .map(|h| load(h, read_nav))
+        .unwrap_or_default();
+    if !nav.is_empty() {
+        return nav;
+    }
+    // spine の toc 属性が指す項目、無ければ NCX の種類の項目
+    let ncx_id = opf
+        .descendants()
+        .find(|n| is_el(n, "spine"))
+        .and_then(|s| s.attribute("toc"));
+    items
+        .iter()
+        .find(|n| {
+            ncx_id.is_some_and(|id| n.attribute("id") == Some(id))
+                || n.attribute("media-type") == Some("application/x-dtbncx+xml")
+        })
+        .and_then(|n| n.attribute("href"))
+        .map(|h| load(h, read_ncx))
+        .unwrap_or_default()
+}
+
+/// 目次を、ページ（`pages` 枚の本の添字）に結びつける。`page_of` は移動先のパス → ページ。
+/// 移動先が本の中に無い項目は捨てる。
+pub(crate) fn toc_pages(
+    zip: &ZipContainer,
+    page_of: impl Fn(&str) -> Option<usize>,
+    pages: usize,
+) -> Vec<TocEntry> {
+    if pages == 0 {
+        return Vec::new();
+    }
+    parse_toc(zip)
+        .into_iter()
+        .filter_map(|r| {
+            let page = page_of(&r.path)?.min(pages - 1);
+            Some(TocEntry {
+                title: r.title,
+                page,
+                level: r.level,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -515,5 +716,101 @@ mod tests {
         assert_eq!(resolve("", "https://h/x.png"), None);
         assert_eq!(resolve("", "#top"), None);
         assert_eq!(resolve("", "100%.png").as_deref(), Some("100%.png"));
+    }
+
+    const NAV: &str = r##"<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body>
+<nav epub:type="landmarks"><ol><li><a href="cover.xhtml">表紙</a></li></ol></nav>
+<nav epub:type="toc"><ol>
+  <li><a href="text/a.xhtml">第 1 章</a>
+    <ol><li><a href="text/b.xhtml#sec2">  1-1
+       節 </a></li></ol></li>
+  <li><a href="text/c.xhtml">第 2 章</a></li>
+  <li><a href="missing.xhtml">本の外</a></li>
+  <li><a href="#only-fragment">断片だけ</a></li>
+</ol></nav></body></html>"##;
+
+    const NCX: &str = r#"<?xml version="1.0"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"><navMap>
+<navPoint id="n1"><navLabel><text>はじめに</text></navLabel><content src="text/a.xhtml"/>
+  <navPoint id="n2"><navLabel><text>詳細</text></navLabel><content src="text/b.xhtml#x"/></navPoint></navPoint>
+<navPoint id="n3"><navLabel><text>おわりに</text></navLabel><content src="text/c.xhtml"/></navPoint>
+</navMap></ncx>"#;
+
+    fn toc_epub(extra_manifest: &str, files: &[(&str, &[u8])]) -> ZipContainer {
+        let manifest = format!(
+            r#"<item id="pa" href="text/a.xhtml" media-type="application/xhtml+xml"/>
+               <item id="pb" href="text/b.xhtml" media-type="application/xhtml+xml"/>
+               <item id="pc" href="text/c.xhtml" media-type="application/xhtml+xml"/>{extra_manifest}"#
+        );
+        let opf = opf(
+            &manifest,
+            r#"<itemref idref="pa"/><itemref idref="pb"/><itemref idref="pc"/>"#,
+        );
+        let (a, b, c) = (
+            page("../images/a.png"),
+            page("../images/b.png"),
+            page("../images/c.png"),
+        );
+        let mut all: Vec<(&str, &[u8])> = vec![
+            ("mimetype", b"application/epub+zip"),
+            ("META-INF/container.xml", CONTAINER.as_bytes()),
+            ("OEBPS/content.opf", opf.as_bytes()),
+            ("OEBPS/text/a.xhtml", a.as_bytes()),
+            ("OEBPS/text/b.xhtml", b.as_bytes()),
+            ("OEBPS/text/c.xhtml", c.as_bytes()),
+            ("OEBPS/images/a.png", b"A"),
+            ("OEBPS/images/b.png", b"B"),
+            ("OEBPS/images/c.png", b"C"),
+        ];
+        all.extend_from_slice(files);
+        open(&all)
+    }
+
+    fn summary(t: &[TocEntry]) -> Vec<(String, usize, u8)> {
+        t.iter()
+            .map(|e| (e.title.clone(), e.page, e.level))
+            .collect()
+    }
+
+    #[test]
+    fn epub3_nav_gives_titles_levels_and_pages() {
+        let zip = toc_epub(
+            r#"<item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>"#,
+            &[("OEBPS/nav.xhtml", NAV.as_bytes())],
+        );
+        let c = EpubContainer::from_zip(zip).ok().expect("epub");
+        // landmarks は目次ではない。本の外・断片だけの項目は捨てる。空白は 1 つにそろえる
+        assert_eq!(
+            summary(&c.toc()),
+            [
+                ("第 1 章".to_owned(), 0, 0),
+                ("1-1 節".to_owned(), 1, 1),
+                ("第 2 章".to_owned(), 2, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn epub2_ncx_is_used_when_there_is_no_nav() {
+        let zip = toc_epub(
+            r#"<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>"#,
+            &[("OEBPS/toc.ncx", NCX.as_bytes())],
+        );
+        let c = EpubContainer::from_zip(zip).ok().expect("epub");
+        assert_eq!(
+            summary(&c.toc()),
+            [
+                ("はじめに".to_owned(), 0, 0),
+                ("詳細".to_owned(), 1, 1),
+                ("おわりに".to_owned(), 2, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn books_without_a_toc_have_an_empty_one() {
+        let c = EpubContainer::from_zip(toc_epub("", &[]))
+            .ok()
+            .expect("epub");
+        assert!(c.toc().is_empty());
     }
 }

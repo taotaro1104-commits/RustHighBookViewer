@@ -80,6 +80,9 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
     var showGrid by remember { mutableStateOf(false) }
     var showText by remember { mutableStateOf(false) }
     var showJump by remember { mutableStateOf(false) }
+    var showToc by remember { mutableStateOf(false) }
+    // EPUB の目次（無ければ空。「目次」ボタンは目次のある本にだけ出す）
+    val toc = remember(reader) { runCatching { reader.toc() }.getOrDefault(emptyList()) }
     /** しおりのあるページ（0 始まり） */
     var bookmarks by remember { mutableStateOf(emptyList<Int>()) }
     var magnifier by remember { mutableStateOf(false) }
@@ -258,9 +261,9 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
     }
 
     // オートめくり: 操作・メニュー表示・ダイアログ中は待ち直し、最後まで来たら止める
-    LaunchedEffect(autoSec, page, uiVisible, showColor, showGrid, showJump, magnifier, state.keepScreenOn) {
+    LaunchedEffect(autoSec, page, uiVisible, showColor, showGrid, showJump, showToc, magnifier, state.keepScreenOn) {
         surfaceHolder[0]?.keepScreenOn = autoSec > 0 || state.keepScreenOn
-        if (autoSec <= 0 || uiVisible || showColor || showGrid || showJump || magnifier) return@LaunchedEffect
+        if (autoSec <= 0 || uiVisible || showColor || showGrid || showJump || showToc || magnifier) return@LaunchedEffect
         delay(autoSec * 1000L)
         if (reader.cursor() + 1u >= reader.spreadCount()) {
             autoSec = 0
@@ -323,6 +326,14 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                     jumpTo(p)
                 },
                 onDismiss = { showGrid = false },
+            )
+        }
+        if (showToc) {
+            TocDialog(
+                toc = toc,
+                currentPage = page,
+                onSelect = { p -> showToc = false; uiVisible = false; jumpTo(p) },
+                onDismiss = { showToc = false },
             )
         }
         if (showJump) {
@@ -413,6 +424,7 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
                             requestIfNeeded()
                         }, label = { Text(label) })
                     }
+                    if (toc.isNotEmpty()) TextButton(onClick = { showToc = true }) { Text("目次") }
                     TextButton(onClick = { showJump = true }) { Text("ページ指定") }
                     TextButton(onClick = { showGrid = true }) { Text("一覧") }
                     if (reader.isText()) TextButton(onClick = { showText = true }) { Text("文字") }

@@ -6,7 +6,7 @@
 
 A comic, image and novel viewer written in Rust. It reads ZIP/CBZ, 7z, RAR, EPUB and folders of images, with right-to-left two-page spreads and vertical or horizontal text. It runs on Android and Windows.
 
-> **Status: under development (latest v0.1.10, pre-release).** On Android it has only been checked in an Android 15 emulator; it has not been tested on a real device yet.
+> **Status: under development (latest v0.1.11, pre-release).** On Android it has only been checked in an Android 15 emulator; it has not been tested on a real device yet.
 
 ## Features
 
@@ -16,6 +16,7 @@ A comic, image and novel viewer written in Rust. It reads ZIP/CBZ, 7z, RAR, EPUB
 - **EPUB, comics and novels**: image-based EPUBs (comics, photo books) open in reading order. Text-only EPUBs such as web novels, and EPUBs that mix text and illustrations, are drawn page by page with a Japanese font from the device, in **vertical writing (switchable to horizontal)**. You can change the text size (28–160), the line spacing (100–240%), the letter spacing (-10 to +60%), bold and italic, the typeface (Gothic or Mincho/serif) and the text and background colors (backgrounds: white, ivory, sepia, light green, dark gray, black; text: black, brown, navy, green, light gray, white) from the reader menu and the settings screen. A live preview shows the chosen colors, and you get a warning when the text and background are too close to read.
 - **Shelf**: history, favorites and title search, with a thumbnail view or a plain list of file and folder names. Your reading position is saved, and closing a book takes you back to the shelf exactly as it was (tab, search, scroll position).
 - **Folder view, sorting and filtering**: the shelf's "Folder" tab lets you walk through the folders your books live in (with an "include subfolders" option). Sort by name, last opened, date added or size, ascending or descending, and filter by unread / reading / finished.
+- **EPUB table of contents**: for EPUBs that have one, the "Contents" button in the reader menu opens the chapter list and jumps to the first page of the chapter (EPUB3 nav and EPUB2 NCX, with nesting).
 - **Resume where you left off**: if the app is closed by the system while you use another app, it reopens the same book on the same page with the same menu state.
 - **Groups**: put several books into a group. Importing a folder that contains several books creates a group named after the folder automatically.
 - **Bulk folder import**: the images directly inside a folder become one book, and each EPUB / ZIP / 7z / RAR file becomes its own book, subfolders included, all added to the shelf (registered in parallel on Android).
@@ -60,7 +61,7 @@ Get the APK (Android) and the exe (Windows) from [GitHub Releases](https://githu
 - Android on a real device (only checked in an emulator)
 - The look and handling of the Windows version (only checked that it starts and keeps running)
 - Password-protected archives and RAR archives split into several files (not supported)
-- Finer typesetting for text EPUBs (tate-chu-yoko, ruby display and jumping from the table of contents are not supported; each image takes one page)
+- Finer typesetting for text EPUBs (tate-chu-yoko, ruby display and jumping to headings inside a chapter are not supported; each image takes one page)
 - Bold and italic are approximations (overstrike and slant), because the device fonts have no bold or italic faces
 - Switching the display language is available only in the Android version (the Windows version is Japanese only). The English, Chinese, Korean and Spanish translations have not been reviewed by native speakers.
 

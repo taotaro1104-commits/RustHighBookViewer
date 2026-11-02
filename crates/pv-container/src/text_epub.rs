@@ -11,9 +11,10 @@ use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
 use bytes::Bytes;
 
 use crate::container::Container;
+use crate::container::TocEntry;
 use crate::entry::{kind_from_path, EntryId, EntryKind, EntryMeta};
 use crate::epub::{
-    dir_of, is_markup, parse_xml, read_text, resolve, rootfile_path, Item, PathIndex,
+    dir_of, is_markup, parse_xml, read_text, resolve, rootfile_path, toc_pages, Item, PathIndex,
     CONTAINER_XML, MAX_SPINE,
 };
 use crate::error::{ContainerError, Result};
@@ -45,6 +46,7 @@ const MIXED_MIN_CHARS: usize = 300;
 
 pub struct TextEpubContainer {
     zip: ZipContainer,
+    toc: Vec<TocEntry>,
     entries: Vec<EntryMeta>,
     pages: Vec<PageKind>,
     spec: PageSpec,
@@ -62,21 +64,24 @@ impl TextEpubContainer {
         zip: ZipContainer,
         style: TextStyle,
     ) -> Result<std::result::Result<Self, ZipContainer>> {
-        let chapters = spine_chapters(&zip);
+        let docs = spine_chapters(&zip);
+        let chapters: Vec<&Vec<Block>> = docs.iter().map(|(_, b)| b).collect();
         let images = chapters
             .iter()
+            .copied()
             .flatten()
             .filter(|b| matches!(b, Block::Image(_)))
             .count();
         let chars: usize = chapters
             .iter()
+            .copied()
             .flatten()
             .map(|b| match b {
                 Block::Heading(_, t) | Block::Para { text: t, .. } => t.chars().count(),
                 _ => 0,
             })
             .sum();
-        if chapters.iter().all(Vec::is_empty) || (images > 0 && chars < MIXED_MIN_CHARS) {
+        if chapters.iter().all(|c| c.is_empty()) || (images > 0 && chars < MIXED_MIN_CHARS) {
             return Ok(Err(zip));
         }
         let Some(font) = font_for(style.typeface) else {
@@ -104,7 +109,10 @@ impl TextEpubContainer {
         let index = PathIndex::new(zip.entries());
         // 文章は連続した範囲ごとに割り付け、画像は独立した 1 ページにして、読む順に並べる
         let mut pages: Vec<PageKind> = Vec::new();
-        for chapter in &chapters {
+        // 章（XHTML）ごとの、最初のページ。目次の移動先に使う
+        let mut doc_start: HashMap<String, usize> = HashMap::new();
+        for (doc_path, chapter) in &docs {
+            doc_start.entry(doc_path.clone()).or_insert(pages.len());
             let mut run: Vec<Block> = Vec::new();
             let flush = |run: &mut Vec<Block>, pages: &mut Vec<PageKind>| {
                 if run.is_empty() {
@@ -152,8 +160,10 @@ impl TextEpubContainer {
                 kind: EntryKind::Image,
             });
         }
+        let toc = toc_pages(&zip, |p| doc_start.get(p).copied(), pages.len());
         Ok(Ok(Self {
             zip,
+            toc,
             entries,
             pages,
             spec,
@@ -363,7 +373,8 @@ fn png_head(w: u32, h: u32) -> Vec<u8> {
 }
 
 /// spine（読む順）の XHTML を読み、章ごとの本文にする。
-fn spine_chapters(zip: &ZipContainer) -> Vec<Vec<Block>> {
+/// 戻り値は (章の XHTML の EPUB 内のパス, その本文)。
+fn spine_chapters(zip: &ZipContainer) -> Vec<(String, Vec<Block>)> {
     let index = PathIndex::new(zip.entries());
     let Some(container) = index.get(CONTAINER_XML).and_then(|id| read_text(zip, id)) else {
         return Vec::new();
@@ -416,7 +427,7 @@ fn spine_chapters(zip: &ZipContainer) -> Vec<Vec<Block>> {
                     other => Some(other),
                 })
                 .collect();
-            Some(blocks)
+            Some((path, blocks))
         })
         .collect()
 }
@@ -431,6 +442,10 @@ impl Container for TextEpubContainer {
             PageKind::Text(_) => Ok(Bytes::from(self.render(id)?)),
             PageKind::Image(zid) => self.zip.read(*zid),
         }
+    }
+
+    fn toc(&self) -> Vec<TocEntry> {
+        self.toc.clone()
     }
 
     fn is_text(&self) -> bool {
@@ -514,7 +529,8 @@ mod tests {
     fn spine_text_is_split_into_chapters() {
         let ch = spine_chapters(&novel());
         assert_eq!(ch.len(), 2);
-        assert_eq!(ch[0][0], Block::Heading(2, "第1話".into()));
+        assert_eq!(ch[0].1[0], Block::Heading(2, "第1話".into()));
+        assert_eq!(ch[0].0, "OEBPS/c1.xhtml");
     }
 
     /// 太字・斜体・文字間は、描いたページの見た目を変える
@@ -730,6 +746,84 @@ mod tests {
             TextEpubContainer::try_open_with(zip, TextStyle::default()),
             Ok(Err(_))
         ));
+    }
+
+    /// 文章の本の目次は、各章の最初のページを指す
+    #[test]
+    fn text_epub_toc_points_at_the_first_page_of_each_chapter() {
+        if font_for(Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let nav = r#"<html xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol>
+<li><a href="c1.xhtml">第一章</a></li><li><a href="c2.xhtml#x">第二章</a></li></ol></nav></body></html>"#;
+        let body = |t: &str| {
+            format!(
+                "<html><body><h2>{t}</h2><p>{}</p></body></html>",
+                "本文です。".repeat(400)
+            )
+        };
+        let container = r#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#;
+        let opf = r#"<package><manifest>
+<item id="nav" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>
+<item id="a" href="c1.xhtml" media-type="application/xhtml+xml"/>
+<item id="b" href="c2.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="a"/><itemref idref="b"/></spine></package>"#;
+        let mut z = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        for (n, d) in [
+            ("META-INF/container.xml", container.to_owned()),
+            ("OEBPS/content.opf", opf.to_owned()),
+            ("OEBPS/nav.xhtml", nav.to_owned()),
+            ("OEBPS/c1.xhtml", body("第一章")),
+            ("OEBPS/c2.xhtml", body("第二章")),
+        ] {
+            z.start_file(n, opts).unwrap();
+            z.write_all(d.as_bytes()).unwrap();
+        }
+        let zip = ZipContainer::open(
+            Arc::new(MemorySource(Bytes::from(z.finish().unwrap().into_inner()))),
+            Limits::default(),
+        )
+        .unwrap();
+        let Ok(Ok(c)) = TextEpubContainer::try_open_with(zip, TextStyle::default()) else {
+            panic!("text epub should open");
+        };
+        let toc = c.toc();
+        assert_eq!(toc.len(), 2);
+        assert_eq!((toc[0].title.as_str(), toc[0].page), ("第一章", 0));
+        assert_eq!(toc[1].title, "第二章");
+        assert!(
+            toc[1].page > 0 && toc[1].page < c.entries().len(),
+            "第 2 章は途中のページから"
+        );
+        // 文字を大きくするとページが増え、2 章目の始まりも後ろへずれる
+        let big = TextStyle {
+            font_px: 90,
+            ..TextStyle::default()
+        };
+        let zip2 = {
+            let mut z = zip::ZipWriter::new(Cursor::new(Vec::new()));
+            for (n, d) in [
+                ("META-INF/container.xml", container.to_owned()),
+                ("OEBPS/content.opf", opf.to_owned()),
+                ("OEBPS/nav.xhtml", nav.to_owned()),
+                ("OEBPS/c1.xhtml", body("第一章")),
+                ("OEBPS/c2.xhtml", body("第二章")),
+            ] {
+                z.start_file(n, opts).unwrap();
+                z.write_all(d.as_bytes()).unwrap();
+            }
+            ZipContainer::open(
+                Arc::new(MemorySource(Bytes::from(z.finish().unwrap().into_inner()))),
+                Limits::default(),
+            )
+            .unwrap()
+        };
+        let Ok(Ok(c2)) = TextEpubContainer::try_open_with(zip2, big) else {
+            panic!("text epub should open");
+        };
+        assert!(c2.toc()[1].page > toc[1].page);
     }
 
     /// 文字色と背景色が、描いたページに反映される

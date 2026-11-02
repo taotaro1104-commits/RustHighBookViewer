@@ -336,6 +336,16 @@ pub struct PvFolderView {
     pub books: Vec<PvBook>,
 }
 
+/// 目次の 1 項目（EPUB の目次）
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PvTocEntry {
+    pub title: String,
+    /// 移動先のページ（0 始まり）
+    pub page: u32,
+    /// 階層の深さ（0 が最上位）
+    pub level: u32,
+}
+
 /// 本をまとめたグループ（シリーズ・フォルダ単位など）
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct PvGroup {

@@ -20,7 +20,7 @@ mod zip_container;
 
 pub use container::{
     open_path, open_source, open_source_in, open_source_styled, open_source_with, Container,
-    ContainerProvider, Limits, Probe,
+    ContainerProvider, Limits, Probe, TocEntry,
 };
 pub use entry::{kind_from_path, natural_cmp, EntryId, EntryKind, EntryMeta};
 pub use epub::EpubContainer;

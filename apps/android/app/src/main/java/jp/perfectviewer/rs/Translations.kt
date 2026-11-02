@@ -91,6 +91,7 @@ internal val TRANSLATIONS: Map<String, List<String>> = buildMap {
     e("☆ しおり", "☆ Bookmark", "☆ 书签", "☆ 책갈피", "☆ Marcador")
     e("保存", "Save", "保存", "저장", "Guardar")
 
+    e("目次", "Contents", "目录", "목차", "Índice")
     // --- 閲覧画面のダイアログ（ReaderDialogs）
     e("しおり", "Bookmarks", "书签", "책갈피", "Marcadores")
     e("★ {1} ページ", "★ Page {1}", "★ 第 {1} 页", "★ {1}페이지", "★ Página {1}")

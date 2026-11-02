@@ -809,3 +809,50 @@ fn equal_sort_keys_fall_back_to_name_then_id() {
     assert_eq!(ids(false), [3, 4, 5]);
     assert_eq!(ids(true), [3, 4, 5]);
 }
+
+#[test]
+fn reader_exposes_the_epub_toc() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("本.epub");
+    {
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        let mut add = |name: &str, body: Vec<u8>| {
+            z.start_file(name, opts).unwrap();
+            z.write_all(&body).unwrap();
+        };
+        add(
+            "META-INF/container.xml",
+            br#"<container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>"#
+                .to_vec(),
+        );
+        add(
+            "c.opf",
+            br#"<package><manifest><item id="n" href="nav.xhtml" properties="nav" media-type="application/xhtml+xml"/>
+<item id="a" href="a.xhtml" media-type="application/xhtml+xml"/><item id="b" href="b.xhtml" media-type="application/xhtml+xml"/>
+<item id="i1" href="1.png" media-type="image/png"/><item id="i2" href="2.png" media-type="image/png"/></manifest>
+<spine><itemref idref="a"/><itemref idref="b"/></spine></package>"#.to_vec(),
+        );
+        add("nav.xhtml", r#"<html xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="a.xhtml">序章</a></li><li><a href="b.xhtml">本編</a></li></ol></nav></body></html>"#.as_bytes().to_vec());
+        add(
+            "a.xhtml",
+            br#"<html><body><img src="1.png"/></body></html>"#.to_vec(),
+        );
+        add(
+            "b.xhtml",
+            br#"<html><body><img src="2.png"/></body></html>"#.to_vec(),
+        );
+        add("1.png", png(60, 90, 10));
+        add("2.png", png(60, 90, 20));
+        z.finish().unwrap();
+    }
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    let r = core.open_path(path.to_string_lossy().into_owned()).unwrap();
+    let toc = r.toc();
+    assert_eq!(toc.len(), 2);
+    assert_eq!(
+        (toc[0].title.as_str(), toc[0].page, toc[0].level),
+        ("序章", 0, 0)
+    );
+    assert_eq!((toc[1].title.as_str(), toc[1].page), ("本編", 1));
+}

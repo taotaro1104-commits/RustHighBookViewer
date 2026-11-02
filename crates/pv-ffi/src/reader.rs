@@ -15,6 +15,7 @@ use crate::types::*;
 pub(crate) struct ReaderInfo {
     pub uri: String,
     pub is_text: bool,
+    pub toc: Vec<PvTocEntry>,
 }
 
 #[derive(uniffi::Object)]
@@ -32,6 +33,8 @@ pub struct PvReader {
     uri: String,
     /// 文章を描いたページでできた本か（文字の大きさ・書体を変えられる）
     is_text: bool,
+    /// EPUB の目次（無ければ空）
+    toc: Vec<PvTocEntry>,
     saved_page: Mutex<Option<usize>>,
     /// ページ寸法を DB に保存済みか（単ページ表示で開いた本を、あとで見開きにしたときに保存する）
     sizes_saved: AtomicBool,
@@ -67,6 +70,7 @@ impl PvReader {
             title,
             uri: info.uri,
             is_text: info.is_text,
+            toc: info.toc,
             saved_page: Mutex::new(None),
             sizes_saved: AtomicBool::new(sizes_saved),
             thumbs,
@@ -137,6 +141,11 @@ impl PvReader {
     /// 本棚に登録した識別子（開き直すときに使う）。
     pub fn uri(&self) -> String {
         self.uri.clone()
+    }
+
+    /// EPUB の目次。無ければ空。
+    pub fn toc(&self) -> Vec<PvTocEntry> {
+        self.toc.clone()
     }
 
     /// 文章の本か。
