@@ -51,13 +51,20 @@ impl Inner {
 
     /// ページを `bx × by` の枠にフィット方式で収めた大きさ。
     fn dest_size(src: Size, bx: f32, by: f32, fit: FitMode) -> Size {
-        let s = fit_scale(
-            Vec2::new(src.w as f32, src.h as f32),
-            Vec2::new(bx, by),
-            fit,
-        );
-        let mut w = (src.w as f32 * s).round().max(1.0);
-        let mut h = (src.h as f32 * s).round().max(1.0);
+        let (mut w, mut h) = if fit == FitMode::Fill {
+            // 全画面: 縦横比を無視して、枠ちょうどに引き伸ばす（全体が画面に収まる）
+            (bx.round().max(1.0), by.round().max(1.0))
+        } else {
+            let s = fit_scale(
+                Vec2::new(src.w as f32, src.h as f32),
+                Vec2::new(bx, by),
+                fit,
+            );
+            (
+                (src.w as f32 * s).round().max(1.0),
+                (src.h as f32 * s).round().max(1.0),
+            )
+        };
         let over = (w.max(h) / MAX_DIM as f32).max(1.0);
         w = (w / over).round().max(1.0);
         h = (h / over).round().max(1.0);
@@ -204,6 +211,18 @@ mod tests {
             Inner::dest_size(src, 400.0, 100.0, FitMode::Height),
             Size::new(50, 100)
         );
+    }
+
+    /// 全画面は、縦横比を無視して枠ちょうどに引き伸ばす
+    #[test]
+    fn dest_size_fill_ignores_aspect_ratio() {
+        for src in [Size::new(100, 200), Size::new(300, 100), Size::new(50, 50)] {
+            assert_eq!(
+                Inner::dest_size(src, 400.0, 300.0, FitMode::Fill),
+                Size::new(400, 300),
+                "{src:?}"
+            );
+        }
     }
 
     #[test]

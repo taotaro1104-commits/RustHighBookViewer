@@ -2,14 +2,15 @@ use std::io::Cursor;
 
 use image::ImageReader;
 
-use crate::{Bitmap, DecodeError, Decoder, Format, Result, Size};
+use crate::{avif, Bitmap, DecodeError, Decoder, Format, Result, Size};
 
-const FORMATS: [Format; 5] = [
+const FORMATS: [Format; 6] = [
     Format::Jpeg,
     Format::Png,
     Format::WebP,
     Format::Gif,
     Format::Bmp,
+    Format::Avif,
 ];
 
 /// `image` クレートによる汎用デコーダ。
@@ -52,6 +53,13 @@ impl Decoder for ImageDecoder {
     }
 
     fn probe_size(&self, data: &[u8]) -> Result<Size> {
+        if avif::is_avif(data) {
+            // ヘッダに寸法が無いときだけ、全体をデコードして調べる
+            return match avif::probe_size(data) {
+                Some(s) => Ok(s),
+                None => avif::decode(data).map(|b| b.size),
+            };
+        }
         let (w, h) = reader(data)?.into_dimensions()?;
         Ok(Size::new(w, h))
     }
@@ -60,6 +68,13 @@ impl Decoder for ImageDecoder {
         let size = self.probe_size(data)?;
         if size.pixels() > self.max_pixels {
             return Err(DecodeError::TooLarge(size.pixels()));
+        }
+        if avif::is_avif(data) {
+            let bitmap = avif::decode(data)?;
+            return Ok(match target {
+                Some(t) => bitmap.downscale_box(scale_factor(bitmap.size, t)),
+                None => bitmap,
+            });
         }
         // JPEG は DCT の段階で縮小しながら読む（原寸で展開して縮めるより数倍速い）
         if let Some(t) = target {
@@ -254,6 +269,28 @@ mod tests {
             "scaled: {scaled:?}  full+box: {full:?}  ({} KB jpeg)",
             data.len() / 1024
         );
+    }
+
+    #[test]
+    fn avif_goes_through_the_common_decoder() {
+        let data = include_bytes!("../testdata/grad64x48.avif");
+        let d = ImageDecoder::default();
+        assert!(d.formats().contains(&Format::Avif));
+        assert_eq!(d.probe_size(data).unwrap(), Size::new(64, 48));
+        assert_eq!(d.decode(data, None).unwrap().size, Size::new(64, 48));
+        // 目標サイズ付きなら、下回らない範囲で縮む（64x48 → 1/2 = 32x24）
+        let b = d.decode(data, Some(Size::new(30, 20))).unwrap();
+        assert_eq!(b.size, Size::new(32, 24));
+    }
+
+    #[test]
+    fn avif_over_the_pixel_limit_is_rejected_before_decoding() {
+        let data = include_bytes!("../testdata/grad64x48.avif");
+        let d = ImageDecoder { max_pixels: 100 };
+        assert!(matches!(
+            d.decode(data, None),
+            Err(DecodeError::TooLarge(_))
+        ));
     }
 
     #[test]

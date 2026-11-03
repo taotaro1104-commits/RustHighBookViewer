@@ -18,3 +18,5 @@ codegen-units = 1
 # unrar_sys 0.5.8 のビルドスクリプトはホスト OS で分岐するため、Android クロスビルド用にパッチ版を使う
 [patch.crates-io]
 unrar_sys = { path = "vendor/unrar_sys" }
+# avif-decode は x86 で rav1d の asm（要 nasm）を有効にするため、asm を切った版を使う
+avif-decode = { path = "vendor/avif-decode" }

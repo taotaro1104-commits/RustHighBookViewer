@@ -1,5 +1,6 @@
 //! 画像デコード。寸法はヘッダだけで取得し、表示サイズに近い解像度で縮小デコードする。
 
+mod avif;
 mod bitmap;
 mod image_decoder;
 
@@ -13,6 +14,7 @@ pub enum Format {
     WebP,
     Gif,
     Bmp,
+    Avif,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +25,8 @@ pub enum DecodeError {
     TooLarge(u64),
     #[error("decode failed: {0}")]
     Image(#[from] image::ImageError),
+    #[error("avif decode failed: {0}")]
+    Avif(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }

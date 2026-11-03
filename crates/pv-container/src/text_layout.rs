@@ -124,10 +124,10 @@ struct Parser {
 
 impl Parser {
     fn flush(&mut self) {
-        let text = self
-            .buf
-            .trim_matches(|c| c == ' ' || c == '\u{a0}')
-            .to_owned();
+        let text = crate::text_glyph::strip_ignorable(
+            self.buf.trim_matches(|c| c == ' ' || c == '\u{a0}'),
+        )
+        .into_owned();
         self.buf.clear();
         if text.is_empty() {
             return;

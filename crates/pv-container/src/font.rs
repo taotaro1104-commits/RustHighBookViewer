@@ -6,7 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use ab_glyph::FontVec;
+use ab_glyph::{Font, FontVec};
 
 use crate::text_style::Typeface;
 
@@ -90,6 +90,94 @@ fn load(typeface: Typeface) -> Option<Arc<FontVec>> {
     None
 }
 
+/// 記号・絵文字などの補助フォントの候補。主フォント（日本語）に字形が無い文字のために使う。
+fn fallback_candidates() -> Vec<PathBuf> {
+    let mut v = paths(&[
+        // Android
+        "/system/fonts/NotoSansSymbols-Regular-Subsetted.ttf",
+        "/system/fonts/NotoSansSymbols2-Regular.ttf",
+        "/system/fonts/NotoSansSymbols-Regular.ttf",
+        "/system/fonts/NotoEmoji-Regular.ttf",
+        "/system/fonts/NotoSansMath-Regular.ttf",
+        "/system/fonts/DroidSansFallback.ttf",
+        // Windows
+        "C:/Windows/Fonts/seguisym.ttf",
+        "C:/Windows/Fonts/seguiemj.ttf",
+        "C:/Windows/Fonts/arialuni.ttf",
+        // macOS
+        "/System/Library/Fonts/Apple Symbols.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        // Linux
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    ]);
+    // Android: 上に無い名前の記号フォントも拾う（色付き絵文字は輪郭を持たないので除く）
+    if let Ok(rd) = fs::read_dir("/system/fonts") {
+        let mut extra: Vec<PathBuf> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name().is_some_and(|n| {
+                    let n = n.to_string_lossy();
+                    ["Symbols", "Emoji", "Math"].iter().any(|k| n.contains(k))
+                        && !n.contains("Color")
+                })
+            })
+            .collect();
+        extra.sort();
+        v.extend(extra);
+    }
+    v
+}
+
+fn load_fallbacks() -> Vec<Arc<FontVec>> {
+    fallback_candidates()
+        .into_iter()
+        .filter_map(|p| {
+            let data = fs::read(p).ok()?;
+            FontVec::try_from_vec_and_index(data, 0).ok().map(Arc::new)
+        })
+        .collect()
+}
+
+/// 主フォントと、記号などのための補助フォント。字形は主フォント → 補助フォントの順に探す。
+/// 補助フォントは、主フォントに無い文字が出てきたときに初めて読み込む。
+pub struct FontSet {
+    primary: Arc<FontVec>,
+    fallbacks: OnceLock<Vec<Arc<FontVec>>>,
+}
+
+fn has_glyph(f: &FontVec, c: char) -> bool {
+    f.glyph_id(c).0 != 0
+}
+
+impl FontSet {
+    pub fn new(primary: Arc<FontVec>) -> Self {
+        Self {
+            primary,
+            fallbacks: OnceLock::new(),
+        }
+    }
+
+    /// 主フォント（行の高さなどの基準）。
+    pub fn primary(&self) -> &FontVec {
+        &self.primary
+    }
+
+    /// `c` の字形を持つフォント。どれにも無ければ `None`。
+    pub fn find(&self, c: char) -> Option<&FontVec> {
+        if has_glyph(&self.primary, c) {
+            return Some(&self.primary);
+        }
+        self.fallbacks
+            .get_or_init(load_fallbacks)
+            .iter()
+            .map(|f| &**f)
+            .find(|f| has_glyph(f, c))
+    }
+}
+
 /// その書体のフォントが端末にあるか（読み込みはしない）。
 pub fn has_typeface(typeface: Typeface) -> bool {
     candidates(typeface).iter().any(|p| p.is_file())
@@ -109,4 +197,15 @@ pub fn font_for(typeface: Typeface) -> Option<Arc<FontVec>> {
             .then(|| get(Typeface::Gothic))
             .flatten()
     })
+}
+
+/// その書体のフォントセット（`font_for` と同じ主フォントに、補助フォントを添える）。書体ごとに 1 つを使い回す。
+pub fn font_set_for(typeface: Typeface) -> Option<Arc<FontSet>> {
+    static CACHE: OnceLock<Mutex<HashMap<Typeface, Arc<FontSet>>>> = OnceLock::new();
+    let primary = font_for(typeface)?;
+    let mut map = CACHE.get_or_init(Mutex::default).lock().ok()?;
+    Some(Arc::clone(
+        map.entry(typeface)
+            .or_insert_with(|| Arc::new(FontSet::new(primary))),
+    ))
 }

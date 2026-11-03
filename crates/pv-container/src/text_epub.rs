@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
 
-use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
+use ab_glyph::{point, Font, PxScale, ScaleFont};
 use bytes::Bytes;
 
 use crate::container::Container;
@@ -18,7 +18,8 @@ use crate::epub::{
     CONTAINER_XML, MAX_SPINE,
 };
 use crate::error::{ContainerError, Result};
-use crate::font::font_for;
+use crate::font::{font_set_for, FontSet};
+use crate::text_glyph::{draw_shape, has_shape};
 use crate::text_layout::{paginate, parse_xhtml, Block, Page, PageSpec};
 use crate::text_style::TextStyle;
 use crate::text_vertical::{draw_vertical, Canvas, Column, Look};
@@ -50,7 +51,7 @@ pub struct TextEpubContainer {
     entries: Vec<EntryMeta>,
     pages: Vec<PageKind>,
     spec: PageSpec,
-    font: Arc<FontVec>,
+    font: Arc<FontSet>,
     style: TextStyle,
 }
 
@@ -84,7 +85,7 @@ impl TextEpubContainer {
         if chapters.iter().all(|c| c.is_empty()) || (images > 0 && chars < MIXED_MIN_CHARS) {
             return Ok(Err(zip));
         }
-        let Some(font) = font_for(style.typeface) else {
+        let Some(font) = font_set_for(style.typeface) else {
             // 画像のある本は、フォントが無くても画像だけで読めるようにする
             return if images > 0 {
                 Ok(Err(zip))
@@ -217,7 +218,11 @@ impl TextEpubContainer {
                 );
                 continue;
             }
-            let ascent = self.font.as_scaled(PxScale::from(line.size)).ascent();
+            let ascent = self
+                .font
+                .primary()
+                .as_scaled(PxScale::from(line.size))
+                .ascent();
             draw_text(
                 &self.font,
                 &mut buf,
@@ -255,9 +260,16 @@ impl TextEpubContainer {
     }
 }
 
-fn advance(font: &FontVec, c: char, size: f32) -> f32 {
-    font.as_scaled(PxScale::from(size))
-        .h_advance(font.glyph_id(c))
+fn advance(font: &FontSet, c: char, size: f32) -> f32 {
+    match font.find(c) {
+        Some(f) => f.as_scaled(PxScale::from(size)).h_advance(f.glyph_id(c)),
+        // 自前で円を描く記号は、全角 1 文字ぶん
+        None if has_shape(c) => size,
+        None => {
+            let f = font.primary();
+            f.as_scaled(PxScale::from(size)).h_advance(f.glyph_id(c))
+        }
+    }
 }
 
 /// 横書きの字形の見た目（文字間の追加分と、太字・斜体）
@@ -274,7 +286,7 @@ const H_ITALIC_SLANT: f32 = 0.2;
 /// 文字を `baseline` に沿って描く（はみ出す部分は捨てる）。`dims` は (幅, 高さ)、`origin` は (行頭の x, ベースライン)。
 #[allow(clippy::too_many_arguments)]
 fn draw_text(
-    font: &FontVec,
+    font: &FontSet,
     buf: &mut [u8],
     dims: (usize, usize),
     origin: (f32, f32),
@@ -285,7 +297,7 @@ fn draw_text(
 ) {
     let (w, h) = dims;
     let (x, baseline) = origin;
-    let scaled = font.as_scaled(PxScale::from(size));
+    let scaled = font.primary().as_scaled(PxScale::from(size));
     let thick = if look.look.bold { size * 0.035 } else { 0.0 };
     let offsets: &[(f32, f32)] = if look.look.bold {
         &[(0.0, 0.0), (thick, 0.0), (0.0, thick), (thick, thick)]
@@ -294,11 +306,26 @@ fn draw_text(
     };
     let mut pen = x;
     for c in text.chars() {
-        let id = font.glyph_id(c);
+        let found = font.find(c);
+        if found.is_none() && has_shape(c) {
+            // どのフォントにも無い丸などの記号は、文字の枠の中心に円を描く
+            let cy = baseline - (scaled.ascent() + scaled.descent()) / 2.0;
+            draw_shape(c, pen + size / 2.0, cy, size, &mut |px, py, cov| {
+                if px >= 0 && py >= 0 && px < w as i64 && py < h as i64 {
+                    let a = (cov.clamp(0.0, 1.0) * 255.0) as u32;
+                    let dst = &mut buf[py as usize * w + px as usize];
+                    *dst = ((u32::from(*dst) * (255 - a) + u32::from(ink) * a) / 255) as u8;
+                }
+            });
+            pen += size + look.extra;
+            continue;
+        }
+        let glyphs = found.unwrap_or(font.primary());
+        let id = glyphs.glyph_id(c);
         for &(ox, oy) in offsets {
             let glyph =
                 id.with_scale_and_position(PxScale::from(size), point(pen + ox, baseline + oy));
-            let Some(outlined) = font.outline_glyph(glyph) else {
+            let Some(outlined) = glyphs.outline_glyph(glyph) else {
                 continue;
             };
             let b = outlined.px_bounds();
@@ -317,7 +344,7 @@ fn draw_text(
                 *dst = ((u32::from(*dst) * (255 - a) + u32::from(ink) * a) / 255) as u8;
             });
         }
-        pen += scaled.h_advance(id) + look.extra;
+        pen += glyphs.as_scaled(PxScale::from(size)).h_advance(id) + look.extra;
     }
 }
 
@@ -475,6 +502,7 @@ impl Container for TextEpubContainer {
 mod tests {
     use super::*;
     use crate::container::Limits;
+    use crate::font::font_for;
     use crate::source::MemorySource;
     use crate::text_style::Typeface;
     use std::io::Write;
@@ -514,6 +542,68 @@ mod tests {
             Limits::default(),
         )
         .unwrap()
+    }
+
+    /// 本文だけを差し替えた 1 章の EPUB（本文は 300 字未満でも文章の本として開く）
+    fn epub_with_body(body: &str) -> ZipContainer {
+        let container =
+            r#"<container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>"#;
+        let opf = r#"<package><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="c"/></spine></package>"#;
+        let page = format!("<html><body><p>{body}</p></body></html>");
+        let files = zip_bytes(&[
+            ("META-INF/container.xml", container),
+            ("c.opf", opf),
+            ("c.xhtml", &page),
+        ]);
+        ZipContainer::open(
+            Arc::new(MemorySource(Bytes::from(files))),
+            Limits::default(),
+        )
+        .unwrap()
+    }
+
+    fn first_page(body: &str, vertical: bool) -> Vec<u8> {
+        let style = TextStyle {
+            vertical,
+            ..TextStyle::default()
+        };
+        let Ok(Ok(c)) = TextEpubContainer::try_open_with(epub_with_body(body), style) else {
+            panic!("text epub should open");
+        };
+        c.read(EntryId(0)).unwrap().to_vec()
+    }
+
+    /// 異体字セレクタなどは、描かず場所も取らない（あっても無くても同じページになる）
+    #[test]
+    fn variation_selectors_do_not_change_the_page() {
+        if font_for(Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        for vertical in [false, true] {
+            let plain = first_page("あ⚪あ", vertical);
+            for noise in ["\u{fe0e}", "\u{fe0f}", "\u{200d}", "\u{e0100}"] {
+                let with = first_page(&format!("あ⚪{noise}あ"), vertical);
+                assert_eq!(plain, with, "vertical={vertical} {noise:?}");
+            }
+        }
+    }
+
+    /// 白丸・黒丸は、フォントに無くても描かれる（空白や豆腐にならない）
+    #[test]
+    fn circle_symbols_are_drawn() {
+        if font_for(Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        for vertical in [false, true] {
+            let blank = first_page("あ　あ", vertical);
+            let white = first_page("あ⚪\u{fe0e}あ", vertical);
+            let black = first_page("あ⚫\u{fe0e}あ", vertical);
+            assert_ne!(blank, white, "白丸 vertical={vertical}");
+            assert_ne!(white, black, "白丸と黒丸は別の見た目 vertical={vertical}");
+        }
     }
 
     #[test]
@@ -926,7 +1016,7 @@ fn bench_real_text_epub() {
     .unwrap();
     eprintln!("zip open: {:?}", t.elapsed());
     let t = std::time::Instant::now();
-    let _ = font_for(crate::text_style::Typeface::Gothic).expect("font");
+    let _ = crate::font::font_for(crate::text_style::Typeface::Gothic).expect("font");
     eprintln!("font load: {:?}", t.elapsed());
     let t = std::time::Instant::now();
     let chapters = spine_chapters(&zip);

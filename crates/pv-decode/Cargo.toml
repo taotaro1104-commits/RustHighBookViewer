@@ -10,5 +10,10 @@ fast_image_resize = "6.1.0"
 jpeg-decoder = { version = "0.3.2", default-features = false }
 thiserror = "2.0.21"
 
+# rav1d は 32 ビット ARM のビルドに nightly が要るため、そこでは AVIF をデコードしない
+[target.'cfg(not(target_arch = "arm"))'.dependencies]
+avif-decode = "3.0.0"
+imgref = "1"
+
 [lints]
 workspace = true

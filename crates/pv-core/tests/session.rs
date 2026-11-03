@@ -372,3 +372,26 @@ fn single_page_mode_does_not_probe_until_layout_needs_sizes() {
     session.set_layout(layout);
     assert_eq!(c.prefix_calls.load(SeqCst), 3);
 }
+
+#[test]
+fn fill_fit_stretches_every_page_to_the_whole_viewport() {
+    use pv_core::FitMode;
+    let dir = book(&[(100, 200), (300, 100), (100, 200)]);
+    let mut s = open(&dir, &settings());
+    s.set_fit(FitMode::Fill);
+    let rx = s.events();
+    for index in 0..2 {
+        // 表紙は単独、あとは見開き。どちらも画面（200x200）をちょうど埋める
+        let _ = s.request_frame(index, VP, 1.0);
+        match wait_event(&rx) {
+            CoreEvent::FrameReady { frame, .. } => {
+                assert_eq!(
+                    (frame.bitmap.size.w, frame.bitmap.size.h),
+                    (200, 200),
+                    "spread {index}"
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+}

@@ -2,7 +2,10 @@
 //! 日本語の縦書きでは、括弧・句読点・長音などの形や位置が横書きと違う。
 //! フォントに縦書き用の字形（CJK 互換形 U+FE10〜FE4F）があればそれを使い、無ければ回転や位置の補正で近づける。
 
-use ab_glyph::{point, Font, FontVec, PxScale, ScaleFont};
+use ab_glyph::{point, Font, PxScale, ScaleFont};
+
+use crate::font::FontSet;
+use crate::text_glyph::{draw_shape, has_shape};
 
 /// 描画先（グレースケール）
 pub struct Canvas<'a> {
@@ -67,9 +70,9 @@ enum Place {
 }
 
 /// どの字形を、どう置くか。
-fn plan(font: &FontVec, c: char) -> (char, Place) {
+fn plan(font: &FontSet, c: char) -> (char, Place) {
     if let Some(v) = vertical_form(c) {
-        if font.glyph_id(v).0 != 0 {
+        if font.find(v).is_some() {
             return (v, Place::Upright(0.0, 0.0));
         }
     }
@@ -86,7 +89,7 @@ fn plan(font: &FontVec, c: char) -> (char, Place) {
 
 /// 列（中心 `cx`）の上端 `top` から下へ、1 文字 `size` ずつ並べて描く。
 pub fn draw_vertical(
-    font: &FontVec,
+    font: &FontSet,
     canvas: &mut Canvas,
     col: Column,
     text: &str,
@@ -100,14 +103,23 @@ pub fn draw_vertical(
         pitch,
     } = col;
     let scale = PxScale::from(size);
-    let scaled = font.as_scaled(scale);
+    let scaled = font.primary().as_scaled(scale);
     // 枠（全角）の中心に字形の中心を合わせるための、ベースラインの位置
     let centre_offset = (scaled.ascent() + scaled.descent()) / 2.0;
     for (i, c) in text.chars().enumerate() {
         let cy = top + (i as f32 + 0.5) * pitch;
         let (shown, place) = plan(font, c);
-        let id = font.glyph_id(shown);
-        let adv = scaled.h_advance(id);
+        let found = font.find(shown);
+        if found.is_none() && has_shape(shown) {
+            // どのフォントにも無い丸などの記号は、枠の中心に円を描く
+            draw_shape(shown, cx, cy, size, &mut |x, y, cov| {
+                canvas.blend(x, y, cov, ink)
+            });
+            continue;
+        }
+        let glyphs = found.unwrap_or(font.primary());
+        let id = glyphs.glyph_id(shown);
+        let adv = glyphs.as_scaled(scale).h_advance(id);
         let (dx, dy) = match place {
             Place::Upright(dx, dy) => (dx * size, dy * size),
             Place::Rotated => (0.0, 0.0),
@@ -123,7 +135,8 @@ pub fn draw_vertical(
         };
         for &(ox, oy) in offsets {
             let pen = point(base.x + ox, base.y + oy);
-            let Some(outlined) = font.outline_glyph(id.with_scale_and_position(scale, pen)) else {
+            let Some(outlined) = glyphs.outline_glyph(id.with_scale_and_position(scale, pen))
+            else {
                 continue;
             };
             let b = outlined.px_bounds();

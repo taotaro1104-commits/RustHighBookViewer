@@ -13,6 +13,7 @@ mod scan;
 mod sevenz;
 mod source;
 mod text_epub;
+mod text_glyph;
 mod text_layout;
 mod text_style;
 mod text_vertical;
