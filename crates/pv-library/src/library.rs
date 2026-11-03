@@ -45,6 +45,15 @@ impl Library {
         Self::init(Connection::open(path)?, true)
     }
 
+    /// テスト用: 現在の `synchronous` の値（0=OFF, 1=NORMAL, 2=FULL）。
+    #[cfg(test)]
+    pub(crate) fn synchronous_mode(&self) -> i64 {
+        self.conn
+            .lock()
+            .query_row("PRAGMA synchronous", [], |r| r.get(0))
+            .unwrap()
+    }
+
     pub fn open_in_memory() -> Result<Self> {
         Self::init(Connection::open_in_memory()?, false)
     }
@@ -52,6 +61,9 @@ impl Library {
     fn init(mut conn: Connection, wal: bool) -> Result<Self> {
         if wal {
             conn.pragma_update(None, "journal_mode", "WAL")?;
+            // WAL では NORMAL でも DB は壊れない（電源断で直近のコミットが失われるだけ）。
+            // 既定の FULL はコミットのたびに fsync するので、多数の本の登録が遅くなる
+            conn.pragma_update(None, "synchronous", "NORMAL")?;
         }
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;

@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
+fast_image_resize = "6.1.0"
+jpeg-decoder = { version = "0.3.2", default-features = false }
 thiserror = "2.0.21"
 
 [lints]

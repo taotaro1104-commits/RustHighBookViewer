@@ -856,3 +856,41 @@ fn reader_exposes_the_epub_toc() {
     );
     assert_eq!((toc[1].title.as_str(), toc[1].page), ("本編", 1));
 }
+
+/// 計測用: 多数の本を続けて登録する時間
+/// （`cargo test -p pv-ffi --release -- --ignored --nocapture bench_bulk_register`）
+#[test]
+#[ignore]
+fn bench_bulk_register() {
+    const BOOKS: usize = 400;
+    let dir = tempfile::tempdir().unwrap();
+    let paths: Vec<String> = (0..BOOKS)
+        .map(|n| {
+            let p = dir.path().join(format!("book{n:04}.cbz"));
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&p).unwrap());
+            let opts = zip::write::SimpleFileOptions::default();
+            for i in 0..3 {
+                z.start_file(format!("{:03}.png", i + 1), opts).unwrap();
+                // 本ごとに中身を変える（同じ内容は同じ本として扱われるため）
+                z.write_all(&png(
+                    200 + (n % 50) as u32,
+                    300 + (n / 50) as u32,
+                    i as u8 * 40,
+                ))
+                .unwrap();
+            }
+            z.finish().unwrap();
+            p.to_string_lossy().into_owned()
+        })
+        .collect();
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    let t = std::time::Instant::now();
+    for p in &paths {
+        core.register_local(p.clone()).unwrap();
+    }
+    let total = t.elapsed();
+    println!(
+        "registered {BOOKS} books in {total:?} ({:?}/book)",
+        total / BOOKS as u32
+    );
+}

@@ -237,6 +237,13 @@ fn persists_across_reopen_with_wal() {
 }
 
 #[test]
+fn file_database_commits_without_fsync_per_transaction() {
+    let dir = tempfile::tempdir().unwrap();
+    let l = Library::open(&dir.path().join("library.db")).unwrap();
+    assert_eq!(l.synchronous_mode(), 1); // NORMAL（WAL ではこれで安全）
+}
+
+#[test]
 fn page_sizes_roundtrip_and_reject_stale_cache() {
     let l = lib();
     let b = l.upsert_book(&nb("/a.cbz", "h1", "A", 3), 1).unwrap();

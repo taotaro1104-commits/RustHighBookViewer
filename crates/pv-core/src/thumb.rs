@@ -3,6 +3,7 @@
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use image::codecs::webp::WebPEncoder;
@@ -49,6 +50,9 @@ pub fn make_thumbnail_from(container: &dyn Container, edge: u32) -> Result<Bitma
 pub struct DiskCache {
     dir: PathBuf,
     max_bytes: u64,
+    /// 保存済みサムネイルの合計サイズの見積もり。上限を超えたときだけディレクトリを走査して整理する
+    /// （保存のたびに全ファイルを調べると、多数の本の登録で処理が 2 乗に増える）
+    approx_bytes: AtomicU64,
 }
 
 impl DiskCache {
@@ -58,10 +62,15 @@ impl DiskCache {
         if !nomedia.exists() {
             fs::write(nomedia, b"")?;
         }
-        Ok(Self {
+        let cache = Self {
             dir: dir.to_owned(),
             max_bytes,
-        })
+            approx_bytes: AtomicU64::new(0),
+        };
+        cache
+            .approx_bytes
+            .store(cache.list()?.iter().map(|f| f.1).sum(), Ordering::Relaxed);
+        Ok(cache)
     }
 
     fn path(&self, key: u64) -> PathBuf {
@@ -87,22 +96,33 @@ impl DiskCache {
         WebPEncoder::new_lossless(&mut buf)
             .encode(&bmp.data, bmp.size.w, bmp.size.h, ExtendedColorType::Rgba8)
             .map_err(|e| CoreError::Settings(format!("thumbnail encode: {e}")))?;
+        let bytes = buf.into_inner();
+        let len = bytes.len() as u64;
         let tmp = self.dir.join(format!("{key:016x}.tmp"));
-        fs::write(&tmp, buf.into_inner())?;
+        fs::write(&tmp, bytes)?;
         fs::rename(&tmp, self.path(key))?;
-        self.evict()
+        // 同じキーの上書きでも加算するので少し多めに見積もるが、整理のときに正確な値に直る
+        if self.approx_bytes.fetch_add(len, Ordering::Relaxed) + len > self.max_bytes {
+            self.evict()?;
+        }
+        Ok(())
     }
 
-    /// 合計が上限を超えていたら、最終アクセスが古いものから削除する。
-    pub fn evict(&self) -> Result<()> {
-        let mut files: Vec<(SystemTime, u64, PathBuf)> = fs::read_dir(&self.dir)?
+    /// 保存済みの (更新時刻, サイズ, パス) の一覧。
+    fn list(&self) -> Result<Vec<(SystemTime, u64, PathBuf)>> {
+        Ok(fs::read_dir(&self.dir)?
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().is_some_and(|x| x == "webp"))
             .filter_map(|e| {
                 let m = e.metadata().ok()?;
                 Some((m.modified().ok()?, m.len(), e.path()))
             })
-            .collect();
+            .collect())
+    }
+
+    /// 合計が上限を超えていたら、最終アクセスが古いものから削除する。
+    pub fn evict(&self) -> Result<()> {
+        let mut files = self.list()?;
         let mut total: u64 = files.iter().map(|f| f.1).sum();
         files.sort_by_key(|f| f.0);
         for (_, len, path) in files {
@@ -113,6 +133,7 @@ impl DiskCache {
                 total -= len;
             }
         }
+        self.approx_bytes.store(total, Ordering::Relaxed);
         Ok(())
     }
 }
@@ -143,6 +164,54 @@ mod tests {
         c.put(2, &bmp(2)).unwrap();
         // 上限 0 なのでどちらも残らない
         assert!(c.get(1).is_none() && c.get(2).is_none());
+    }
+
+    fn total_bytes(dir: &Path) -> u64 {
+        fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|x| x == "webp"))
+            .map(|e| e.metadata().unwrap().len())
+            .sum()
+    }
+
+    #[test]
+    fn evicts_down_to_limit_across_many_puts() {
+        let dir = tempfile::tempdir().unwrap();
+        let one = {
+            let c = DiskCache::open(dir.path(), 1 << 20).unwrap();
+            c.put(1, &bmp(1)).unwrap();
+            total_bytes(dir.path())
+        };
+        let c = DiskCache::open(dir.path(), one * 5).unwrap();
+        for k in 2..40u64 {
+            c.put(k, &bmp(k as u8)).unwrap();
+        }
+        // 上限を大きく超えて溜まらない（見積もりで整理が走っている）
+        assert!(
+            total_bytes(dir.path()) <= one * 6,
+            "{}",
+            total_bytes(dir.path())
+        );
+        // 直近に入れたものは残る
+        assert!(c.get(39).is_some());
+    }
+
+    #[test]
+    fn existing_files_count_toward_the_limit_after_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = DiskCache::open(dir.path(), 1 << 20).unwrap();
+        for k in 1..=3u64 {
+            big.put(k, &bmp(k as u8)).unwrap();
+        }
+        let one = total_bytes(dir.path()) / 3;
+        let c = DiskCache::open(dir.path(), one * 2).unwrap();
+        c.put(4, &bmp(4)).unwrap();
+        assert!(
+            total_bytes(dir.path()) <= one * 2,
+            "{}",
+            total_bytes(dir.path())
+        );
     }
 
     #[test]
