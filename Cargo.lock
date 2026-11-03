@@ -1164,7 +1164,7 @@ checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
 name = "desktop"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "dirs",
  "eframe",
@@ -3475,7 +3475,7 @@ dependencies = [
 
 [[package]]
 name = "pv-cli"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "image",
  "pv-container",
@@ -3484,7 +3484,7 @@ dependencies = [
 
 [[package]]
 name = "pv-container"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "ab_glyph",
  "bytes",
@@ -3507,7 +3507,7 @@ dependencies = [
 
 [[package]]
 name = "pv-core"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "bytes",
  "crossbeam-channel",
@@ -3529,7 +3529,7 @@ dependencies = [
 
 [[package]]
 name = "pv-decode"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "avif-decode",
  "fast_image_resize",
@@ -3541,7 +3541,7 @@ dependencies = [
 
 [[package]]
 name = "pv-ffi"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "bytes",
  "crossbeam-channel",
@@ -3560,7 +3560,7 @@ dependencies = [
 
 [[package]]
 name = "pv-layout"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "proptest",
  "serde",
@@ -3568,7 +3568,7 @@ dependencies = [
 
 [[package]]
 name = "pv-library"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "blake3",
  "natord",
@@ -3581,7 +3581,7 @@ dependencies = [
 
 [[package]]
 name = "pv-process"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "fast_image_resize",
  "pv-decode",
@@ -3590,7 +3590,7 @@ dependencies = [
 
 [[package]]
 name = "pv-render"
-version = "0.1.14"
+version = "0.1.15"
 dependencies = [
  "serde",
 ]
