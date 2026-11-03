@@ -49,8 +49,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 val scope = rememberCoroutineScope()
-                val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-                    if (uri != null) scope.launch { openPersisted(uri) }
+                // 複数のファイルを選べる。1 つなら開き、複数なら本棚へまとめて登録する
+                val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+                    if (uris.isNotEmpty()) scope.launch { openPersisted(uris) }
                 }
                 val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
                     if (uri != null) scope.launch { openPersisted(uri) }
@@ -141,6 +142,13 @@ class MainActivity : ComponentActivity() {
     }
 
     /** 次回以降も本棚から開けるよう、読み取り権限を永続化してから開く */
+    private suspend fun openPersisted(uris: List<Uri>) {
+        uris.forEach { u ->
+            runCatching { contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        }
+        state.openDocuments(uris)
+    }
+
     private suspend fun openPersisted(uri: Uri) {
         runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         state.open(uri)

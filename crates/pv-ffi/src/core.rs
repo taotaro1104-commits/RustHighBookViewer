@@ -191,6 +191,20 @@ impl PvCore {
         self.open_container_inner(Arc::new(container), key, uri, title)
     }
 
+    /// content:// の書庫（fd は所有権ごと渡す）を、開かずに本棚へ登録する。複数のファイルをまとめて追加するとき用。
+    /// 複数のスレッドから同時に呼べる（キャンセルの解除は `scan_folder` / `clear_cancel` が行う）。
+    pub fn register_fd(&self, fd: i32, uri: String, title: String) -> PvResult<PvBook> {
+        let src = source_from_fd(fd).map_err(PvError::open)?;
+        let p = self.prepare_source(src, uri, title)?;
+        let (book, _) = self.register_container(p.container.as_ref(), &p.key, p.uri, p.title)?;
+        Ok(PvBook::from(&book))
+    }
+
+    /// 「開く」の中断の合図を下ろす（複数の登録を始める前に呼ぶ）。
+    pub fn clear_cancel(&self) {
+        self.cancel.store(false, Ordering::Relaxed);
+    }
+
     /// 端末内のパスで開く。フォルダなら直下の画像を 1 冊に、書庫ファイルならその 1 冊を開く
     /// （「すべてのファイルへのアクセス」権限があるとき用。SAF より速い）。
     pub fn open_local(self: Arc<Self>, path: String) -> PvResult<Arc<PvReader>> {
@@ -401,6 +415,16 @@ impl PvCore {
             });
         }
         let src: Arc<dyn Source> = Arc::new(FileSource::open(p).map_err(PvError::open)?);
+        self.prepare_source(src, uri, local_title(p, true))
+    }
+
+    /// 書庫ファイル（Source）を開く準備: 識別子を作り、中身を読めるようにする。
+    fn prepare_source(
+        &self,
+        src: Arc<dyn Source>,
+        uri: String,
+        title: String,
+    ) -> PvResult<Prepared> {
         let mut head = vec![0u8; HEAD_LEN.min(src.len() as usize)];
         let n = read_fully(src.as_ref(), &mut head).map_err(PvError::new)?;
         let key = BookKey::from_head(src.len(), &head[..n]);
@@ -414,7 +438,7 @@ impl PvCore {
             container,
             key,
             uri,
-            title: local_title(p, true),
+            title,
         })
     }
 
@@ -469,19 +493,8 @@ impl PvCore {
         uri: String,
         title: String,
     ) -> PvResult<Arc<PvReader>> {
-        let size = src.len();
-        let mut head = vec![0u8; HEAD_LEN.min(size as usize)];
-        let n = read_fully(src.as_ref(), &mut head).map_err(PvError::new)?;
-        let key = BookKey::from_head(size, &head[..n]);
-
-        let guard = ExtractGuard {
-            cancel: Arc::clone(&self.cancel),
-            ..ExtractGuard::default()
-        };
-        let container: Arc<dyn Container> =
-            open_source_styled(src, &self.scratch, &guard, self.settings.lock().text)
-                .map_err(PvError::open)?;
-        self.open_container_inner(container, key, uri, title)
+        let p = self.prepare_source(src, uri, title)?;
+        self.open_container_inner(p.container, p.key, p.uri, p.title)
     }
 
     fn open_container_inner(

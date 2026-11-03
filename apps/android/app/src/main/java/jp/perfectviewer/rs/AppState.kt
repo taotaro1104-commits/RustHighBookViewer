@@ -283,24 +283,61 @@ class AppState private constructor(private val context: Context) {
         }
     }
 
-    private suspend fun registerAll(paths: List<String>, groupName: String) {
-        val registered = arrayOfNulls<PvBook>(paths.size) // 読んだ順ではなく、見つけた順に並べるため添字で持つ
+    private suspend fun registerAll(paths: List<String>, groupName: String) =
+        registerAll(paths.size, groupName, { paths[it] }) { core.registerLocal(paths[it]) }
+
+    /**
+     * 選んだ複数のファイルを、開かずに本棚へ登録する。1 つだけなら、そのまま開く。
+     * 並べ替えや読書状況は、あとから本棚で扱える。
+     */
+    suspend fun openDocuments(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        if (uris.size == 1) return open(uris[0])
+        if (busy) return
+        busy = true
+        cancelRequested = false
+        try {
+            core.clearCancel()
+            registerAll(uris.size, "", { uris[it].toString() }) { i ->
+                val pfd = context.contentResolver.openFileDescriptor(uris[i], "r") ?: error(Tr.t("ファイルを開けません"))
+                core.registerFd(pfd.detachFd(), uris[i].toString(), displayName(uris[i]))
+            }
+            // 履歴タブには開いた本しか出ないので、追加した本が見える「すべて」へ移す
+            shelfTab = ShelfTab.ALL
+            shelfGroup = null
+            shelfScrollToTop = true
+        } finally {
+            busy = false
+            importProgress = null
+        }
+    }
+
+    /** `count` 件を数冊ずつ並べて登録する。`label` はログ用、`register` は 1 件の登録（失敗は例外）。 */
+    private suspend fun registerAll(
+        count: Int,
+        groupName: String,
+        label: (Int) -> String,
+        register: (Int) -> PvBook,
+    ) {
+        val registered = arrayOfNulls<PvBook>(count) // 読んだ順ではなく、並べた順に持つため添字で持つ
         val failed = AtomicInteger()
         val finished = AtomicInteger()
-        importProgress = 0 to paths.size
+        importProgress = 0 to count
         // 画像のデコードや 7z/RAR の展開は重いので、数冊ずつ並べて登録する（多すぎると作業領域と電池を食う）
         val gate = Semaphore(REGISTER_PARALLELISM)
         coroutineScope {
-            paths.mapIndexed { i, p ->
+            (0 until count).map { i ->
                 async(Dispatchers.IO) {
                     gate.withPermit {
                         if (cancelRequested) return@withPermit
                         val t0 = System.nanoTime()
-                        val book = runCatching { core.registerLocal(p) }.getOrNull()
-                        Log.i("PV", "registered in ${(System.nanoTime() - t0) / 1_000_000} ms: $p")
+                        val book = runCatching { register(i) }
+                            .onFailure { Log.w("PV", "register failed: ${label(i)}", it) }
+                            .getOrNull()
+                        Log.i("PV", "registered in ${(System.nanoTime() - t0) / 1_000_000} ms: ${label(i)}")
                         if (book != null) registered[i] = book else failed.incrementAndGet()
                         val n = finished.incrementAndGet()
-                        importProgress = n to paths.size
+                        importProgress = n to count
                         if (n % 5 == 0) shelfVersion++ // 途中経過も本棚に出す
                     }
                 }
