@@ -94,7 +94,7 @@ fun SettingsScreen(state: AppState) {
             ) { update(s.copy(direction = it)) }
             Choice(
                 "フィット", s.fit,
-                listOf(PvFit.PAGE to "全体", PvFit.WIDTH to "幅", PvFit.HEIGHT to "高さ"),
+                listOf(PvFit.PAGE to "全体", PvFit.WIDTH to "幅", PvFit.HEIGHT to "高さ", PvFit.FILL to "全画面"),
             ) { update(s.copy(fit = it)) }
             Toggle("表紙を単独で表示", "先頭ページだけ 1 枚で表示します", s.firstPageSingle) { update(s.copy(firstPageSingle = it)) }
             Toggle("横長のページは単独で表示", "見開きの絵などを 2 ページ分に割り込ませません", s.widePageAlone) { update(s.copy(widePageAlone = it)) }

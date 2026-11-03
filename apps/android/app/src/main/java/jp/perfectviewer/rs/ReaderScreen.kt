@@ -321,6 +321,8 @@ fun ReaderScreen(state: AppState, reader: PvReader) {
             PageGridDialog(
                 reader,
                 currentPage = page,
+                size = state.gridSize,
+                onSize = { state.updateGridSize(it) },
                 onPick = { p ->
                     showGrid = false
                     jumpTo(p)

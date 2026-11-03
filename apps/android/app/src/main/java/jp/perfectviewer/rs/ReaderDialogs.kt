@@ -57,6 +57,17 @@ import uniffi.pv_ffi.PvReader
 
 private const val THUMB_PARALLELISM = 2
 
+/** ページ一覧のサムネイルの大きさ。`cell` は 1 枚の幅（dp）、`edge` は作るサムネイルの長辺（画素）。 */
+enum class ThumbSize(val label: String, val cell: Int, val edge: UInt) {
+    SMALL("小", 64, 160u),
+    MEDIUM("中", 96, 200u),
+    LARGE("大", 160, 400u);
+
+    companion object {
+        fun fromName(name: String?): ThumbSize = entries.firstOrNull { it.name == name } ?: MEDIUM
+    }
+}
+
 /** ページ番号を入力して移動する。しおりの一覧（移動・外す）も出す。`onJump` の引数は 0 始まりのページ。 */
 @Composable
 fun PageJumpDialog(
@@ -153,8 +164,16 @@ private fun Int.signed() = if (this > 0) "+$this" else "$this"
 
 /** 全ページのサムネイル一覧。タップでそのページへ移動する。 */
 @Composable
-fun PageGridDialog(reader: PvReader, currentPage: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
-    val cache = remember { object : LruCache<Int, Bitmap>(24 * 1024 * 1024) {
+fun PageGridDialog(
+    reader: PvReader,
+    currentPage: Int,
+    size: ThumbSize,
+    onSize: (ThumbSize) -> Unit,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // 大きさを変えると作るサムネイルの解像度も変わるので、大きさごとに作り直す
+    val cache = remember(size) { object : LruCache<Int, Bitmap>(32 * 1024 * 1024) {
         override fun sizeOf(key: Int, value: Bitmap) = value.byteCount
     } }
     val total = reader.pageCount().toInt()
@@ -167,23 +186,31 @@ fun PageGridDialog(reader: PvReader, currentPage: Int, onPick: (Int) -> Unit, on
             Column {
                 Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(Tr.f("ページ一覧  {1}/{2}", currentPage + 1, total), Modifier.weight(1f).padding(start = 8.dp), color = Color.White)
+                    ThumbSize.entries.reversed().forEach { s ->
+                        FilterChip(
+                            selected = s == size,
+                            onClick = { onSize(s) },
+                            label = { Text(s.label) },
+                            modifier = Modifier.padding(end = 4.dp),
+                        )
+                    }
                     TextButton(onClick = onDismiss) { Text("閉じる") }
                 }
                 LazyVerticalGrid(
                     state = state,
-                    columns = GridCells.Adaptive(96.dp),
+                    columns = GridCells.Adaptive(size.cell.dp),
                     modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(count = total, key = { it }) { page ->
-                        val bmp: Bitmap? by produceState(cache.get(page), page) {
+                        val bmp: Bitmap? by produceState(cache.get(page), page, size) {
                             if (value == null) {
                                 value = gate.withPermit {
                                     withContext(Dispatchers.IO) {
                                         // 本を閉じた直後に破棄済みになることがある。その場合は空のまま
                                         runCatching {
-                                            reader.pageThumbnail(page.toUInt(), 200u)
+                                            reader.pageThumbnail(page.toUInt(), size.edge)
                                                 ?.let { rgbaToBitmap(it.width, it.height, it.rgba) }
                                                 ?.also { cache.put(page, it) }
                                         }.getOrNull()
