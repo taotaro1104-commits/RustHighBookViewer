@@ -52,7 +52,7 @@ fun GroupGrid(state: AppState, groups: List<PvGroup>, onOpen: (PvGroup) -> Unit)
     var renaming by remember { mutableStateOf<PvGroup?>(null) }
     var deleting by remember { mutableStateOf<PvGroup?>(null) }
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(130.dp),
+        columns = GridCells.Adaptive(state.shelfThumb.cell.dp),
         state = state.shelfGrid,
         modifier = Modifier.fillMaxSize().padding(top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),

@@ -53,6 +53,29 @@ internal fun SortMenu(state: AppState) {
     }
 }
 
+/** 本棚のサムネイル（表紙）の大きさ。`cell` は 1 枚の幅（dp）。 */
+enum class ShelfThumb(val label: String, val cell: Int) {
+    SMALL("小", 85),
+    MEDIUM("中", 130),
+    LARGE("大", 200);
+
+    companion object {
+        fun fromName(name: String?): ShelfThumb = entries.firstOrNull { it.name == name } ?: MEDIUM
+    }
+}
+
+/** 本棚のサムネイルの大きさ（大・中・小）。サムネイル表示のときだけ出す。 */
+@Composable
+internal fun ShelfThumbChips(state: AppState) {
+    ShelfThumb.entries.reversed().forEach { t ->
+        FilterChip(
+            selected = state.shelfThumb == t,
+            onClick = { state.updateShelfThumb(t) },
+            label = { Text(t.label) },
+        )
+    }
+}
+
 /** 読書状況での絞り込み: すべて・未読・読書中・既読 */
 @Composable
 internal fun StatusFilter(state: AppState) {

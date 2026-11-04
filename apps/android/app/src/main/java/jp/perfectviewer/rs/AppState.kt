@@ -56,6 +56,7 @@ private const val KEY_SESSION_QUERY = "session_query"
 private const val KEY_SHELF_SORT_DESC = "shelf_sort_desc"
 private const val KEY_SHELF_LIST = "shelf_list"
 private const val KEY_GRID_SIZE = "grid_size"
+private const val KEY_SHELF_THUMB = "shelf_thumb"
 private const val KEY_LANGUAGE = "language"
 
 /** アプリ全体の状態。画面回転では Activity を作り直さない（Manifest の configChanges）ので単純な保持で足りる。 */
@@ -166,6 +167,15 @@ class AppState private constructor(private val context: Context) {
         shelfAsList = v
         prefs.edit().putBoolean(KEY_SHELF_LIST, v).apply()
         shelfScrollToTop = true
+    }
+
+    /** 本棚のサムネイル（表紙）の大きさ */
+    var shelfThumb by mutableStateOf(ShelfThumb.fromName(prefs.getString(KEY_SHELF_THUMB, null)))
+        private set
+
+    fun updateShelfThumb(v: ShelfThumb) {
+        shelfThumb = v
+        prefs.edit().putString(KEY_SHELF_THUMB, v.name).apply()
     }
 
     /** 閲覧中の「一覧」（ページのサムネイル）の大きさ */

@@ -135,6 +135,7 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
             TextButton(onClick = { state.updateShelfAsList(!state.shelfAsList) }) {
                 Text(if (state.shelfAsList) "▦ サムネイル表示" else "☰ 名前の一覧")
             }
+            if (!state.shelfAsList) ShelfThumbChips(state)
             SortMenu(state)
             ShelfTab.entries.forEach { t ->
                 FilterChip(selected = tab == t, onClick = {
@@ -192,7 +193,7 @@ fun ShelfScreen(state: AppState, onPickFile: () -> Unit, onPickFolder: () -> Uni
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(130.dp),
+                    columns = GridCells.Adaptive(state.shelfThumb.cell.dp),
                     state = state.shelfGrid,
                     modifier = Modifier.fillMaxSize().padding(top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
