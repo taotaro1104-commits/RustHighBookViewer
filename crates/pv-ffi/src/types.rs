@@ -77,6 +77,13 @@ pub fn describe_error_in(lang: Lang, e: &(dyn std::error::Error + 'static)) -> S
                 "문장 EPUB을 표시할 일본어 글꼴이 기기에 없습니다",
                 "No se encontró en el dispositivo una fuente japonesa para mostrar EPUB de texto",
             ]),
+            ContainerError::InvalidFont(_) => t([
+                "フォントとして読み込めません（ttf / otf / ttc の 64 MB までのファイルを選んでください）",
+                "This file is not a usable font (choose a ttf / otf / ttc file up to 64 MB)",
+                "无法作为字体读取（请选择 64 MB 以内的 ttf / otf / ttc 文件）",
+                "글꼴로 읽을 수 없습니다 (64 MB 이하의 ttf / otf / ttc 파일을 선택하세요)",
+                "No se puede usar como fuente (elija un archivo ttf / otf / ttc de hasta 64 MB)",
+            ]),
             ContainerError::Unsupported => t([
                 "対応していない形式です（ZIP/CBZ・7z・RAR・EPUB・フォルダに対応）",
                 "Unsupported format (ZIP/CBZ, 7z, RAR, EPUB and folders are supported)",
@@ -274,10 +281,14 @@ pub struct PvBook {
 }
 
 /// 文章の EPUB の書体
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum PvTypeface {
     Gothic,
     Mincho,
+    /// 取り込んだフォント（`import_font` が返した ID）
+    Custom {
+        id: String,
+    },
 }
 
 impl From<pv_container::Typeface> for PvTypeface {
@@ -285,6 +296,7 @@ impl From<pv_container::Typeface> for PvTypeface {
         match t {
             pv_container::Typeface::Gothic => Self::Gothic,
             pv_container::Typeface::Mincho => Self::Mincho,
+            pv_container::Typeface::Custom(id) => Self::Custom { id },
         }
     }
 }
@@ -294,12 +306,30 @@ impl From<PvTypeface> for pv_container::Typeface {
         match t {
             PvTypeface::Gothic => Self::Gothic,
             PvTypeface::Mincho => Self::Mincho,
+            PvTypeface::Custom { id } => Self::Custom(id),
+        }
+    }
+}
+
+/// 取り込んだフォント
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PvFontInfo {
+    pub id: String,
+    /// 表示用の名前
+    pub name: String,
+}
+
+impl From<pv_container::FontInfo> for PvFontInfo {
+    fn from(f: pv_container::FontInfo) -> Self {
+        Self {
+            id: f.id,
+            name: f.name,
         }
     }
 }
 
 /// 文章の EPUB の見た目。変えたあとは、本を開き直すと反映される。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct PvTextStyle {
     /// 文字の大きさ（`TEXT_SIZE_MIN`〜`TEXT_SIZE_MAX`）
     pub size: u32,
@@ -658,6 +688,13 @@ mod tests {
         }
         assert!(describe_error_in(Lang::En, &CoreError::NoPages).contains("No images"));
         assert!(describe_error_in(Lang::Es, &ContainerError::NoFont).contains("fuente"));
+        let bad = ContainerError::InvalidFont("x".into());
+        let (ja, en, es) = (
+            describe_error_in(Lang::Ja, &bad),
+            describe_error_in(Lang::En, &bad),
+            describe_error_in(Lang::Es, &bad),
+        );
+        assert!(ja.contains("フォント") && en.contains("font") && es.contains("fuente"));
     }
 
     #[test]

@@ -255,4 +255,13 @@ internal val TRANSLATIONS: Map<String, List<String>> = buildMap {
     e("書体", "Typeface", "字体", "글꼴", "Tipo de letra")
     e("この端末には、ほかの書体のフォントがありません。", "No other typefaces are available on this device.", "此设备上没有其他字体。", "이 기기에는 다른 글꼴이 없습니다.", "No hay otros tipos de letra en este dispositivo.")
     e("適用", "Apply", "应用", "적용", "Aplicar")
+    e("フォントを取り込む", "Import a font", "导入字体", "글꼴 가져오기", "Importar una fuente")
+    e("ttf / otf / ttc（64 MB まで）。日本語の字形が無い文字は、ゴシック体で表示されます。", "ttf / otf / ttc (up to 64 MB). Characters the font lacks are shown in Gothic.", "ttf / otf / ttc（最大 64 MB）。字体中没有的日文字符将以黑体显示。", "ttf / otf / ttc (최대 64 MB). 글꼴에 없는 글자는 고딕체로 표시됩니다.", "ttf / otf / ttc (hasta 64 MB). Los caracteres que falten se muestran en Gótica.")
+    e("取り込んだフォント", "Imported fonts", "已导入的字体", "가져온 글꼴", "Fuentes importadas")
+    e("削除", "Delete", "删除", "삭제", "Eliminar")
+    e("このフォントを削除しますか？", "Delete this font?", "要删除此字体吗？", "이 글꼴을 삭제할까요?", "¿Eliminar esta fuente?")
+    e("フォントを取り込めません: {1}", "Could not import the font: {1}", "无法导入字体：{1}", "글꼴을 가져올 수 없습니다: {1}", "No se pudo importar la fuente: {1}")
+    e("フォントを削除できません: {1}", "Could not delete the font: {1}", "无法删除字体：{1}", "글꼴을 삭제할 수 없습니다: {1}", "No se pudo eliminar la fuente: {1}")
+    e("ファイルが大きすぎます（64 MB まで）", "The file is too large (64 MB max)", "文件过大（最大 64 MB）", "파일이 너무 큽니다 (최대 64 MB)", "El archivo es demasiado grande (máx. 64 MB)")
+    e("ファイルを開けません", "Could not open the file", "无法打开文件", "파일을 열 수 없습니다", "No se pudo abrir el archivo")
 }

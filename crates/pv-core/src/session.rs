@@ -9,7 +9,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use crossbeam_channel::{Receiver, Sender};
 use parking_lot::Mutex;
-use pv_container::{open_path, Container, EntryKind};
+use pv_container::{open_path_styled, Container, EntryKind};
 use pv_decode::{Decoder, ImageDecoder, Size};
 use pv_layout::{build_spreads, spread_of_page, LayoutOptions, PageMeta, Spread, ViewMode};
 use pv_process::ColorAdjust;
@@ -91,7 +91,7 @@ fn fit_id(f: FitMode) -> u8 {
 impl BookSession {
     pub fn open(uri: &str, settings: &Settings) -> Result<Self> {
         let path = uri.strip_prefix("file://").unwrap_or(uri);
-        let container = open_path(Path::new(path))?;
+        let container = open_path_styled(Path::new(path), settings.text.clone())?;
         Self::open_container(container, hash_str(uri), settings)
     }
 

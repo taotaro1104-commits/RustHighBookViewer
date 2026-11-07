@@ -97,10 +97,20 @@ impl Limits {
 
 /// パスから開く。ディレクトリならフォルダ、ファイルなら登録済みプロバイダで判定する。
 pub fn open_path(path: &Path) -> Result<Arc<dyn Container>> {
+    open_path_styled(path, TextStyle::default())
+}
+
+/// `open_path` に加えて、文章の EPUB の見た目（文字の大きさ・書体）を指定する。
+pub fn open_path_styled(path: &Path, text_style: TextStyle) -> Result<Arc<dyn Container>> {
     if path.is_dir() {
         return Ok(Arc::new(FolderContainer::open(path)?));
     }
-    open_source(Arc::new(FileSource::open(path)?))
+    open_source_styled(
+        Arc::new(FileSource::open(path)?),
+        &std::env::temp_dir(),
+        &ExtractGuard::default(),
+        text_style,
+    )
 }
 
 /// 7z / RAR を作業領域へ展開するときの展開後サイズ合計の上限
@@ -159,4 +169,57 @@ pub fn open_source_styled(
         }
     }
     Err(ContainerError::Unsupported)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+    use crate::font::font_for;
+    use crate::text_style::Typeface;
+
+    fn write_novel_epub(path: &Path) {
+        let container =
+            r#"<container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>"#;
+        let opf = r#"<package><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="c"/></spine></package>"#;
+        let page = format!(
+            "<html><body><p>{}</p></body></html>",
+            "本文です。".repeat(800)
+        );
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, data) in [
+            ("META-INF/container.xml", container),
+            ("c.opf", opf),
+            ("c.xhtml", page.as_str()),
+        ] {
+            z.start_file(name, opts).unwrap();
+            z.write_all(data.as_bytes()).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    /// パスから開くときも、渡した文字スタイルでページが割り付けられる
+    #[test]
+    fn open_path_styled_applies_text_style() {
+        if font_for(&Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("novel.epub");
+        write_novel_epub(&p);
+        let pages = |px| {
+            let style = TextStyle {
+                font_px: px,
+                ..TextStyle::default()
+            };
+            open_path_styled(&p, style).unwrap().entries().len()
+        };
+        let (small, large) = (pages(32), pages(96));
+        assert!(small < large, "{small} {large}");
+        assert_eq!(open_path(&p).unwrap().entries().len(), pages(44));
+    }
 }

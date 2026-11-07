@@ -43,6 +43,7 @@ impl Data {
             .or_else(|| dirs::data_dir().map(|d| d.join("PerfectViewerRs")))
             .ok_or("no data directory")?;
         std::fs::create_dir_all(&dir)?;
+        pv_container::set_font_dir(dir.join("fonts"));
         let settings = Settings::load(&dir.join("settings.toml")).unwrap_or_else(|e| {
             eprintln!("settings ignored: {e}");
             Settings::default()

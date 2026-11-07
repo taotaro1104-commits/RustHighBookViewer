@@ -67,6 +67,11 @@ impl PvCore {
     pub fn new(data_dir: String) -> PvResult<Arc<Self>> {
         let dir = PathBuf::from(data_dir);
         std::fs::create_dir_all(&dir).map_err(PvError::new)?;
+        // フォントの置き場はプロセス全体で 1 つ。テストは並列に PvCore を作るので、
+        // フォントを使うテストが自分で決める（tests.rs の `font_env`）。
+        if !cfg!(test) {
+            pv_container::set_font_dir(dir.join("fonts"));
+        }
         let settings_path = dir.join("settings.toml");
         let settings = Settings::load(&settings_path).unwrap_or_else(|e| {
             eprintln!("settings ignored: {e}");
@@ -111,7 +116,7 @@ impl PvCore {
 
     /// 文章の EPUB の文字の大きさ・書体。
     pub fn text_style(&self) -> PvTextStyle {
-        let t = self.settings.lock().text;
+        let t = self.settings.lock().text.clone();
         PvTextStyle {
             size: t.font_px,
             typeface: t.typeface.into(),
@@ -132,7 +137,11 @@ impl PvCore {
         let mut updated = guard.clone();
         updated.text = pv_container::TextStyle {
             font_px: style.size,
-            typeface: style.typeface.into(),
+            // 空の ID は設定ファイルとして読めなくなる（設定ぜんぶが初期化される）ので、ゴシックにする
+            typeface: match style.typeface {
+                PvTypeface::Custom { id } if id.is_empty() => pv_container::Typeface::Gothic,
+                other => other.into(),
+            },
             line_spacing: style.line_spacing,
             ink: style.ink,
             paper: style.paper,
@@ -148,11 +157,43 @@ impl PvCore {
     }
 
     /// 端末で使える書体（明朝体は端末にフォントが無いことがある）。
+    /// 取り込んだフォントは、ファイルがあるものだけ末尾に並ぶ。
     pub fn available_typefaces(&self) -> Vec<PvTypeface> {
-        [PvTypeface::Gothic, PvTypeface::Mincho]
+        let builtin = [PvTypeface::Gothic, PvTypeface::Mincho]
             .into_iter()
-            .filter(|t| pv_container::has_typeface((*t).into()))
+            .filter(|t| pv_container::has_typeface(&t.clone().into()));
+        let imported = pv_container::list_fonts()
+            .into_iter()
+            .map(|f| PvTypeface::Custom { id: f.id });
+        builtin.chain(imported).collect()
+    }
+
+    /// フォントファイル（ttf / otf / ttc、64 MB まで）の中身を取り込む。`file_name` は拡張子の判定と表示名に使う。
+    pub fn import_font(&self, file_name: String, data: Vec<u8>) -> PvResult<PvFontInfo> {
+        pv_container::import_font(&file_name, &data)
+            .map(PvFontInfo::from)
+            .map_err(PvError::new)
+    }
+
+    /// 取り込んだフォントの一覧（名前順）。
+    pub fn imported_fonts(&self) -> Vec<PvFontInfo> {
+        pv_container::list_fonts()
+            .into_iter()
+            .map(PvFontInfo::from)
             .collect()
+    }
+
+    /// 取り込んだフォントを消す。選択中だったときはゴシック体に戻す（開いている本は開き直すと反映される）。
+    pub fn remove_font(&self, id: String) -> PvResult<()> {
+        pv_container::remove_font(&id).map_err(PvError::new)?;
+        let mut guard = self.settings.lock();
+        if guard.text.typeface == pv_container::Typeface::Custom(id) {
+            let mut updated = guard.clone();
+            updated.text.typeface = pv_container::Typeface::Gothic;
+            updated.save(&self.settings_path).map_err(PvError::new)?;
+            *guard = updated;
+        }
+        Ok(())
     }
 
     /// すべての本の「本ごとの設定」（表示モード・綴じ方向・フィット・色調整）を消す。
@@ -432,8 +473,13 @@ impl PvCore {
             cancel: Arc::clone(&self.cancel),
             ..ExtractGuard::default()
         };
-        let container = open_source_styled(src, &self.scratch, &guard, self.settings.lock().text)
-            .map_err(PvError::open)?;
+        let container = open_source_styled(
+            src,
+            &self.scratch,
+            &guard,
+            self.settings.lock().text.clone(),
+        )
+        .map_err(PvError::open)?;
         Ok(Prepared {
             container,
             key,

@@ -122,10 +122,11 @@ fun SettingsScreen(state: AppState) {
         Section("文章の本（EPUB）") {
             Note("画像の無い文章の EPUB を表示するときの見た目です。変更は、次に本を開いたときから反映されます（開いている本は、閲覧メニューの「文字」で開き直せます）。")
             var text by remember { mutableStateOf(state.core.textStyle()) }
-            val faces = remember { state.core.availableTypefaces() }
+            var faces by remember { mutableStateOf(state.core.availableTypefaces()) }
+            var fonts by remember { mutableStateOf(state.core.importedFonts()) }
             fun updateText(next: uniffi.pv_ffi.PvTextStyle) {
                 text = next
-                scope.launch(Dispatchers.IO) {
+                scope.launch(state.settingsIo) {
                     runCatching { state.core.setTextStyle(next) }
                         .onFailure { e -> withContext(Dispatchers.Main) { state.toast(Tr.f("設定を保存できません: {1}", e.message)) } }
                 }
@@ -134,7 +135,18 @@ fun SettingsScreen(state: AppState) {
                 "文字の向き", text.vertical,
                 listOf(true to "縦書き", false to "横書き"),
             ) { updateText(text.copy(vertical = it)) }
-            Choice("書体", text.typeface, faces.map { it to typefaceLabel(it) }) { updateText(text.copy(typeface = it)) }
+            Choice("書体", text.typeface, faces.map { it to typefaceLabel(it, fonts) }) { updateText(text.copy(typeface = it)) }
+            FontImportSection(state, fonts) {
+                // 取り込み・削除のあとは、選択肢と（削除で戻った）書体を読み直す。ディレクトリを調べるので UI スレッドではしない
+                scope.launch {
+                    val (f, ff, t) = withContext(state.settingsIo) {
+                        Triple(state.core.availableTypefaces(), state.core.importedFonts(), state.core.textStyle())
+                    }
+                    faces = f
+                    fonts = ff
+                    text = t
+                }
+            }
             Choice(
                 "文字の大きさ", text.size.toInt(),
                 listOf(32, 36, 40, 44, 48, 56, 64, 80, 96, 112, 128, 160).map { it to it.toString() },

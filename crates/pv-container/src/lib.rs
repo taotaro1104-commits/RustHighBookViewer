@@ -7,6 +7,7 @@ mod error;
 mod extract;
 mod folder;
 mod font;
+mod font_store;
 mod path;
 mod rar;
 mod scan;
@@ -20,8 +21,8 @@ mod text_vertical;
 mod zip_container;
 
 pub use container::{
-    open_path, open_source, open_source_in, open_source_styled, open_source_with, Container,
-    ContainerProvider, Limits, Probe, TocEntry,
+    open_path, open_path_styled, open_source, open_source_in, open_source_styled, open_source_with,
+    Container, ContainerProvider, Limits, Probe, TocEntry,
 };
 pub use entry::{kind_from_path, natural_cmp, EntryId, EntryKind, EntryMeta};
 pub use epub::EpubContainer;
@@ -29,6 +30,9 @@ pub use error::{ContainerError, Result};
 pub use extract::{ExtractGuard, ExtractedContainer, Extractor};
 pub use folder::FolderContainer;
 pub use font::has_typeface;
+pub use font_store::{
+    import_font, list_fonts, remove_font, set_font_dir, FontInfo, MAX_FONT_BYTES,
+};
 pub use path::{decode_name, normalize_path};
 pub use rar::RarProvider;
 pub use scan::{scan_books, ScanItem, ScanKind};

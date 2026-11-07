@@ -34,11 +34,6 @@ internal const val LETTER_MIN = -10f
 internal const val LETTER_MAX = 60f
 private const val LETTER_STEP = 5f
 
-internal fun typefaceLabel(t: PvTypeface) = when (t) {
-    PvTypeface.GOTHIC -> "ゴシック体"
-    PvTypeface.MINCHO -> "明朝体"
-}
-
 /** 「小さく ──●── 大きく」のような、ボタン付きのスライダー（刻みで動く） */
 @Composable
 private fun StepSlider(value: Float, min: Float, max: Float, step: Float, less: String, more: String, onChange: (Float) -> Unit) {
@@ -63,6 +58,7 @@ private fun StepSlider(value: Float, min: Float, max: Float, step: Float, less: 
 fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: () -> Unit) {
     val current = remember { state.core.textStyle() }
     val faces = remember { state.core.availableTypefaces() }
+    val fonts = remember { state.core.importedFonts() }
     var size by remember { mutableFloatStateOf(current.size.toFloat().coerceIn(SIZE_MIN, SIZE_MAX)) }
     var face by remember { mutableStateOf(current.typeface) }
     var ink by remember { mutableStateOf(current.ink.toInt()) }
@@ -96,7 +92,7 @@ fun TextStyleDialog(state: AppState, onApply: (PvTextStyle) -> Unit, onClose: ()
                 Text("書体")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     faces.forEach { t ->
-                        FilterChip(selected = face == t, onClick = { face = t }, label = { Text(typefaceLabel(t)) })
+                        FilterChip(selected = face == t, onClick = { face = t }, label = { Text(typefaceLabel(t, fonts)) })
                     }
                     FilterChip(selected = bold, onClick = { bold = !bold }, label = { Text("太字") })
                     FilterChip(selected = italic, onClick = { italic = !italic }, label = { Text("斜体") })

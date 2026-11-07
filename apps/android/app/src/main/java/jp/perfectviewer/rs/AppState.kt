@@ -239,8 +239,54 @@ class AppState private constructor(private val context: Context) {
     /** 閲覧中だけ設定される。音量キーを押したとき処理したら true を返す */
     var volumeHandler: ((Boolean) -> Boolean)? = null
 
+    /** 設定の保存・読み直しを順番どおりに行う場所（遅れて着いた古い保存が、新しい設定を上書きしないように） */
+    val settingsIo = Dispatchers.IO.limitedParallelism(1)
+
     fun contentResolverOutput(uri: Uri): java.io.OutputStream =
         context.contentResolver.openOutputStream(uri) ?: error(Tr.t("保存先を開けません"))
+
+    /**
+     * フォントファイルを読む（表示名, 中身）。上限を超えるファイルは、中身を読む前に断る。
+     * 重いので IO スレッドから呼ぶ。
+     */
+    fun readFont(uri: Uri): Pair<String, ByteArray> {
+        var name = "font.ttf"
+        var size = -1L
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+            ?.use { c ->
+                if (c.moveToFirst()) {
+                    c.getString(0)?.let { name = it }
+                    if (!c.isNull(1)) size = c.getLong(1)
+                }
+            }
+        // 表示名に拡張子が無い提供元がある。中身は Rust 側で確かめるので、足りなければ .ttf を補う
+        if (listOf(".ttf", ".otf", ".ttc").none { name.endsWith(it, ignoreCase = true) }) name += ".ttf"
+        val tooBig = { error(Tr.t("ファイルが大きすぎます（64 MB まで）")) }
+        if (size > MAX_FONT_BYTES) tooBig()
+        val input = context.contentResolver.openInputStream(uri) ?: error(Tr.t("ファイルを開けません"))
+        input.use {
+            // 大きさが分かるときは、その大きさの配列に直接読む（途中のコピーでメモリを食わない）
+            if (size > 0) {
+                val bytes = ByteArray(size.toInt())
+                var n = 0
+                while (n < bytes.size) {
+                    val r = it.read(bytes, n, bytes.size - n)
+                    if (r < 0) break
+                    n += r
+                }
+                return name to (if (n == bytes.size) bytes else bytes.copyOf(n))
+            }
+            val out = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = it.read(buf)
+                if (n < 0) break
+                out.write(buf, 0, n)
+                if (out.size() > MAX_FONT_BYTES) tooBig()
+            }
+            return name to out.toByteArray()
+        }
+    }
 
     fun toast(msg: String) = Toast.makeText(context, Tr.t(msg), Toast.LENGTH_SHORT).show()
 

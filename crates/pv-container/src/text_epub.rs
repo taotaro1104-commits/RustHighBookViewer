@@ -85,7 +85,7 @@ impl TextEpubContainer {
         if chapters.iter().all(|c| c.is_empty()) || (images > 0 && chars < MIXED_MIN_CHARS) {
             return Ok(Err(zip));
         }
-        let Some(font) = font_set_for(style.typeface) else {
+        let Some(font) = font_set_for(&style.typeface) else {
             // 画像のある本は、フォントが無くても画像だけで読めるようにする
             return if images > 0 {
                 Ok(Err(zip))
@@ -256,7 +256,7 @@ impl TextEpubContainer {
             FOOTER_INK,
             HLook::default(),
         );
-        encode_png(&colorize(&buf, self.style), w as u32, h as u32)
+        encode_png(&colorize(&buf, self.style.clone()), w as u32, h as u32)
     }
 }
 
@@ -577,7 +577,7 @@ mod tests {
     /// 異体字セレクタなどは、描かず場所も取らない（あっても無くても同じページになる）
     #[test]
     fn variation_selectors_do_not_change_the_page() {
-        if font_for(Typeface::Gothic).is_none() {
+        if font_for(&Typeface::Gothic).is_none() {
             eprintln!("skipped: no CJK font on this machine");
             return;
         }
@@ -593,7 +593,7 @@ mod tests {
     /// 白丸・黒丸は、フォントに無くても描かれる（空白や豆腐にならない）
     #[test]
     fn circle_symbols_are_drawn() {
-        if font_for(Typeface::Gothic).is_none() {
+        if font_for(&Typeface::Gothic).is_none() {
             eprintln!("skipped: no CJK font on this machine");
             return;
         }
@@ -626,7 +626,7 @@ mod tests {
     /// 太字・斜体・文字間は、描いたページの見た目を変える
     #[test]
     fn bold_italic_and_spacing_change_the_page() {
-        if font_for(Typeface::Gothic).is_none() {
+        if font_for(&Typeface::Gothic).is_none() {
             eprintln!("skipped: no CJK font on this machine");
             return;
         }
@@ -680,7 +680,7 @@ mod tests {
     /// 横書きでも開けて描け、縦書きとは別のページになる
     #[test]
     fn horizontal_writing_renders_differently_from_vertical() {
-        if font_for(Typeface::Gothic).is_none() {
+        if font_for(&Typeface::Gothic).is_none() {
             eprintln!("skipped: no CJK font on this machine");
             return;
         }
@@ -769,7 +769,7 @@ mod tests {
     /// 画像と文章が混ざった EPUB は、文章のページと画像のページを、読む順に並べる
     #[test]
     fn mixed_epub_interleaves_text_pages_and_images_in_reading_order() {
-        if font_for(Typeface::Gothic).is_none() {
+        if font_for(&Typeface::Gothic).is_none() {
             eprintln!("skipped: no CJK font on this machine");
             return;
         }
@@ -841,7 +841,7 @@ mod tests {
     /// 文章の本の目次は、各章の最初のページを指す
     #[test]
     fn text_epub_toc_points_at_the_first_page_of_each_chapter() {
-        if font_for(Typeface::Gothic).is_none() {
+        if font_for(&Typeface::Gothic).is_none() {
             eprintln!("skipped: no CJK font on this machine");
             return;
         }
@@ -919,7 +919,7 @@ mod tests {
     /// 文字色と背景色が、描いたページに反映される
     #[test]
     fn page_uses_the_chosen_colors() {
-        if font_for(Typeface::Gothic).is_none() {
+        if font_for(&Typeface::Gothic).is_none() {
             eprintln!("skipped: no CJK font on this machine");
             return;
         }
@@ -952,7 +952,7 @@ mod tests {
     /// 文字を大きくするとページ数が増え、書体を変えても開ける（明朝体が無い環境ではゴシック体で代用）
     #[test]
     fn style_changes_pagination() {
-        if font_for(Typeface::Gothic).is_none() {
+        if font_for(&Typeface::Gothic).is_none() {
             eprintln!("skipped: no CJK font on this machine");
             return;
         }
@@ -979,7 +979,7 @@ mod tests {
     /// フォントがある環境でだけ、実際に描いて確かめる
     #[test]
     fn pages_render_when_a_font_is_available() {
-        let Some(_) = font_for(Typeface::Gothic) else {
+        let Some(_) = font_for(&Typeface::Gothic) else {
             eprintln!("skipped: no CJK font on this machine");
             return;
         };
@@ -1016,7 +1016,7 @@ fn bench_real_text_epub() {
     .unwrap();
     eprintln!("zip open: {:?}", t.elapsed());
     let t = std::time::Instant::now();
-    let _ = crate::font::font_for(crate::text_style::Typeface::Gothic).expect("font");
+    let _ = crate::font::font_for(&crate::text_style::Typeface::Gothic).expect("font");
     eprintln!("font load: {:?}", t.elapsed());
     let t = std::time::Instant::now();
     let chapters = spine_chapters(&zip);

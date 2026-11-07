@@ -162,6 +162,28 @@ mod tests {
     }
 
     #[test]
+    fn settings_toml_round_trips_custom_typeface() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("settings.toml");
+        let mut s = Settings::default();
+        s.text.typeface = pv_container::Typeface::Custom("0a1b2c3d-Foo".into());
+        s.save(&p).unwrap();
+        assert_eq!(Settings::load(&p).unwrap(), s);
+        // 旧形式の書体指定もそのまま読める
+        std::fs::write(
+            &p,
+            "[text]
+typeface = \"mincho\"
+",
+        )
+        .unwrap();
+        assert_eq!(
+            Settings::load(&p).unwrap().text.typeface,
+            pv_container::Typeface::Mincho
+        );
+    }
+
+    #[test]
     fn old_partial_file_keeps_defaults_for_new_fields() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("s.toml");

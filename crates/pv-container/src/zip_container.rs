@@ -36,7 +36,7 @@ impl ContainerProvider for ZipProvider {
         let zip = ZipContainer::open(src, self.limits.unwrap_or_default())?;
         // 本文のある EPUB は文章と画像を、コミック・写真集は画像を、spine の順に並べる。読めなければ通常の ZIP として扱う
         Ok(
-            match TextEpubContainer::try_open_with(zip, self.text_style)? {
+            match TextEpubContainer::try_open_with(zip, self.text_style.clone())? {
                 // 本文のある EPUB（画像の無いもの・画像と文章が混ざったもの）は、文章と画像を読む順に並べる
                 Ok(text) => Arc::new(text),
                 Err(zip) => match EpubContainer::from_zip(zip) {

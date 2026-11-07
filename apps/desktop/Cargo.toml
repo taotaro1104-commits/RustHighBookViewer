@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 dirs = "7.0.0"
 eframe = "0.37.0"
+pv-container = { version = "0.1.0", path = "../../crates/pv-container" }
 pv-core = { version = "0.1.0", path = "../../crates/pv-core" }
 pv-library = { version = "0.1.0", path = "../../crates/pv-library" }
 pv-render = { version = "0.1.0", path = "../../crates/pv-render" }
@@ -16,3 +17,6 @@ serde_json = "1.0.154"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"

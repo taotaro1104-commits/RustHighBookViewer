@@ -1,6 +1,7 @@
 mod data;
 mod reader;
 mod shelf;
+mod text_settings;
 
 use std::path::{Path, PathBuf};
 
@@ -9,11 +10,13 @@ use eframe::egui;
 use data::Data;
 use reader::{Reader, ReaderExit};
 use shelf::{Shelf, ShelfAction};
+use text_settings::TextSettingsWindow;
 
 struct App {
     data: Data,
     shelf: Shelf,
     reader: Option<Reader>,
+    text_settings: TextSettingsWindow,
     error: Option<String>,
 }
 
@@ -24,6 +27,7 @@ impl App {
             data,
             shelf: Shelf::new(),
             reader: None,
+            text_settings: TextSettingsWindow::default(),
             error: None,
         };
         if let Some(p) = initial {
@@ -97,8 +101,10 @@ impl eframe::App for App {
                     self.open(&p);
                 }
             }
+            Some(ShelfAction::OpenTextSettings) => self.text_settings.open = true,
             None => {}
         }
+        self.text_settings.show(&ctx, &mut self.data);
     }
 
     fn on_exit(&mut self) {

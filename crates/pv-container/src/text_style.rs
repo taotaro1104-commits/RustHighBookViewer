@@ -18,18 +18,46 @@ pub const MAX_LETTER_SPACING: i32 = 60;
 pub const DEFAULT_INK: u32 = 0x1C1C1C;
 pub const DEFAULT_PAPER: u32 = 0xF5F5F5;
 
-/// 書体の種類
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// 書体の種類。設定ファイルでは文字列（`"gothic"` / `"mincho"` / `"custom:<フォント ID>"`）で持つ。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub enum Typeface {
     /// ゴシック体（既定）
     #[default]
     Gothic,
     /// 明朝体
     Mincho,
+    /// 取り込んだフォント（ID は `import_font` が返したもの）
+    Custom(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+impl Serialize for Typeface {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Gothic => s.serialize_str("gothic"),
+            Self::Mincho => s.serialize_str("mincho"),
+            Self::Custom(id) => s.serialize_str(&format!("custom:{id}")),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Typeface {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        match s.as_str() {
+            "gothic" => Ok(Self::Gothic),
+            "mincho" => Ok(Self::Mincho),
+            _ => match s.strip_prefix("custom:") {
+                Some(id) if !id.is_empty() => Ok(Self::Custom(id.to_string())),
+                _ => Err(serde::de::Error::invalid_value(
+                    serde::de::Unexpected::Str(&s),
+                    &"\"gothic\", \"mincho\" or \"custom:<id>\"",
+                )),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TextStyle {
     /// 本文の文字の大きさ（ページ画像上の画素。ページの幅は 1080）
@@ -142,6 +170,34 @@ mod tests {
         // 欠けている項目は既定値
         let d: TextStyle = serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(d, TextStyle::default());
+    }
+
+    #[test]
+    fn typeface_round_trips_as_string() {
+        let custom = Typeface::Custom("0a1b2c3d-Foo".into());
+        assert_eq!(
+            serde_json::to_value(&custom).unwrap(),
+            serde_json::json!("custom:0a1b2c3d-Foo")
+        );
+        assert_eq!(
+            serde_json::to_value(Typeface::Gothic).unwrap(),
+            serde_json::json!("gothic")
+        );
+        assert_eq!(
+            serde_json::to_value(Typeface::Mincho).unwrap(),
+            serde_json::json!("mincho")
+        );
+        for t in [Typeface::Gothic, Typeface::Mincho, custom] {
+            let v = serde_json::to_value(&t).unwrap();
+            assert_eq!(serde_json::from_value::<Typeface>(v).unwrap(), t);
+        }
+    }
+
+    #[test]
+    fn unknown_or_empty_custom_is_rejected() {
+        for bad in ["custom:", "cursive", ""] {
+            assert!(serde_json::from_value::<Typeface>(serde_json::json!(bad)).is_err());
+        }
     }
 
     #[test]

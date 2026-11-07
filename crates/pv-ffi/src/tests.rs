@@ -894,3 +894,123 @@ fn bench_bulk_register() {
         total / BOOKS as u32
     );
 }
+
+/// 端末にある日本語フォントの中身（無ければテストをスキップ）
+fn system_font_bytes() -> Option<Vec<u8>> {
+    [
+        "C:/Windows/Fonts/YuGothM.ttc",
+        "C:/Windows/Fonts/meiryo.ttc",
+        "C:/Windows/Fonts/msgothic.ttc",
+        "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/system/fonts/NotoSansCJK-Regular.ttc",
+    ]
+    .iter()
+    .find_map(|p| std::fs::read(p).ok())
+    .or_else(|| {
+        eprintln!("skipped: no CJK font on this machine");
+        None
+    })
+}
+
+/// フォントの置き場を使うテストを直列にして、`data` の下の `fonts` を置き場にする。
+fn font_env(data: &Path) -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    pv_container::set_font_dir(data.join("fonts"));
+    guard
+}
+
+fn text_style_with(typeface: PvTypeface) -> PvTextStyle {
+    PvTextStyle {
+        size: 44,
+        typeface,
+        line_spacing: 160,
+        ink: 0x1C1C1C,
+        paper: 0xF5F5F5,
+        letter_spacing: 0,
+        bold: false,
+        italic: false,
+        vertical: true,
+    }
+}
+
+#[test]
+fn font_import_roundtrip() {
+    let Some(font) = system_font_bytes() else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let _fonts = font_env(&dir.path().join("data"));
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    let info = core.import_font("My Font.ttf".into(), font).unwrap();
+    assert_eq!(core.imported_fonts(), vec![info.clone()]);
+
+    let custom = PvTypeface::Custom {
+        id: info.id.clone(),
+    };
+    core.set_text_style(text_style_with(custom.clone()))
+        .unwrap();
+    assert_eq!(core.text_style().typeface, custom);
+    assert!(core.available_typefaces().contains(&custom));
+
+    // 削除すると、選択中だった書体はゴシックに戻って保存される
+    core.remove_font(info.id).unwrap();
+    assert!(core.imported_fonts().is_empty());
+    assert_eq!(core.text_style().typeface, PvTypeface::Gothic);
+    assert!(!core.available_typefaces().contains(&custom));
+}
+
+#[test]
+fn invalid_font_is_error_and_localized() {
+    let dir = tempfile::tempdir().unwrap();
+    let _fonts = font_env(&dir.path().join("data"));
+    let core = PvCore::new(dir.path().join("data").to_string_lossy().into_owned()).unwrap();
+    let err = core.import_font("a.ttf".into(), vec![1, 2, 3]).unwrap_err();
+    let PvError::Failed { msg } = err;
+    assert!(!msg.is_empty());
+    assert!(core.imported_fonts().is_empty());
+}
+
+#[test]
+fn stale_custom_typeface_in_settings_still_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(
+        data.join("settings.toml"),
+        "[text]\ntypeface = \"custom:zzzzzzzz-none\"\n",
+    )
+    .unwrap();
+    let _fonts = font_env(&data);
+    let core = PvCore::new(data.to_string_lossy().into_owned()).unwrap();
+    assert_eq!(
+        core.text_style().typeface,
+        PvTypeface::Custom {
+            id: "zzzzzzzz-none".into()
+        }
+    );
+    // ファイルが無い書体は選択肢に出ない
+    assert!(!core
+        .available_typefaces()
+        .iter()
+        .any(|t| matches!(t, PvTypeface::Custom { .. })));
+}
+
+/// 空の ID の書体を保存しても、設定ファイル全体が読めなくなって初期化されることはない
+#[test]
+fn empty_custom_typeface_does_not_corrupt_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data").to_string_lossy().into_owned();
+    let _fonts = font_env(&dir.path().join("data"));
+    let core = PvCore::new(data.clone()).unwrap();
+    let mut s = core.settings();
+    s.first_page_single = !s.first_page_single;
+    core.set_settings(s).unwrap();
+    core.set_text_style(text_style_with(PvTypeface::Custom { id: String::new() }))
+        .unwrap();
+    assert_eq!(core.text_style().typeface, PvTypeface::Gothic);
+    let reopened = PvCore::new(data).unwrap();
+    assert_eq!(reopened.settings().first_page_single, s.first_page_single);
+}

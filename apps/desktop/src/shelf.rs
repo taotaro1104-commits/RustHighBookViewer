@@ -18,6 +18,7 @@ pub enum ShelfAction {
     Open(std::path::PathBuf),
     OpenDialogFile,
     OpenDialogFolder,
+    OpenTextSettings,
 }
 
 pub struct Shelf {
@@ -92,6 +93,9 @@ impl Shelf {
                 }
                 if ui.button("フォルダを開く").clicked() {
                     action = Some(ShelfAction::OpenDialogFolder);
+                }
+                if ui.button("文字設定").clicked() {
+                    action = Some(ShelfAction::OpenTextSettings);
                 }
                 ui.separator();
                 for (tab, label) in [
