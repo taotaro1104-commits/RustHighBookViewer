@@ -91,6 +91,16 @@ pub fn describe_error_in(lang: Lang, e: &(dyn std::error::Error + 'static)) -> S
                 "지원하지 않는 형식입니다 (ZIP/CBZ·7z·RAR·EPUB·폴더 지원)",
                 "Formato no compatible (se admiten ZIP/CBZ, 7z, RAR, EPUB y carpetas)",
             ]),
+            ContainerError::UnsupportedCompression(inner) => td(
+                [
+                    "書庫の中身が対応していない圧縮方式です。ZIP などで圧縮し直してください（{}）",
+                    "The contents use an unsupported compression method. Please re-compress it as a normal ZIP ({})",
+                    "内容使用了不支持的压缩方式。请重新压缩为普通 ZIP（{}）",
+                    "내용이 지원하지 않는 압축 방식입니다. 일반 ZIP으로 다시 압축하세요 ({})",
+                    "El contenido usa un método de compresión no compatible. Vuelva a comprimirlo como ZIP normal ({})",
+                ],
+                inner,
+            ),
             ContainerError::Cancelled => cancelled(),
             ContainerError::LimitExceeded(what) => match *what {
                 "entry count" => t([

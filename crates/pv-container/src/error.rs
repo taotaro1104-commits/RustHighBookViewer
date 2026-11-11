@@ -8,6 +8,9 @@ pub enum ContainerError {
     Zip(#[from] zip::result::ZipError),
     #[error("archive error: {0}")]
     Archive(String),
+    /// 書庫（EPUB など）の中身が、対応していない圧縮方式で入っている
+    #[error("unsupported compression method: {0}")]
+    UnsupportedCompression(String),
     #[error("cancelled")]
     Cancelled,
     #[error("unsupported format")]

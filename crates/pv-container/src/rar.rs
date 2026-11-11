@@ -58,8 +58,9 @@ impl ContainerProvider for RarProvider {
                 };
                 // 画像以外（読み飛ばすもの）は展開せずに先へ進む
                 let wanted = is_file
-                    && normalize_path(&name)
-                        .is_some_and(|n| kind_from_path(&n) == EntryKind::Image);
+                    && normalize_path(&name).is_some_and(|n| {
+                        matches!(kind_from_path(&n), EntryKind::Image | EntryKind::Archive)
+                    });
                 if wanted && size > self.limits.max_entry_size.min(MAX_IN_MEMORY_ENTRY) {
                     return Err(ContainerError::LimitExceeded("entry size"));
                 }

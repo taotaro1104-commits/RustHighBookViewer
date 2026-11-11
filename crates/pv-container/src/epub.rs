@@ -131,6 +131,47 @@ pub(crate) fn read_text(zip: &ZipContainer, id: EntryId) -> Option<String> {
     Some(text.trim_start_matches('\u{feff}').to_owned())
 }
 
+/// EPUB らしい ZIP（container.xml がある）の目次・本文が読み出せるか確かめる。
+/// 非対応の圧縮方式・壊れた項目はここでエラーにし、「EPUB ではない ZIP」として黙って扱わない。
+pub(crate) fn ensure_readable(zip: &ZipContainer) -> Result<()> {
+    let index = PathIndex::new(zip.entries());
+    if index.get(CONTAINER_XML).is_none() {
+        return Ok(());
+    }
+    for e in zip.entries() {
+        let probe = e.path.eq_ignore_ascii_case(CONTAINER_XML)
+            || matches!(
+                e.path
+                    .rsplit_once('.')
+                    .map(|(_, x)| x.to_ascii_lowercase())
+                    .as_deref(),
+                Some("opf" | "xhtml" | "html" | "htm")
+            );
+        if probe {
+            match zip.read_prefix(e.id, 1) {
+                Err(crate::error::ContainerError::Io(io))
+                    if io.kind() == std::io::ErrorKind::Unsupported =>
+                {
+                    return Err(crate::error::ContainerError::UnsupportedCompression(
+                        io.to_string(),
+                    ));
+                }
+                Err(crate::error::ContainerError::Zip(
+                    zip::result::ZipError::UnsupportedArchive(m),
+                )) => {
+                    return Err(crate::error::ContainerError::UnsupportedCompression(
+                        m.to_string(),
+                    ));
+                }
+                other => {
+                    other?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn parse_xml(text: &str) -> Option<roxmltree::Document<'_>> {
     let opts = roxmltree::ParsingOptions {
         allow_dtd: true, // XHTML 由来の DOCTYPE を持つ OPF がある

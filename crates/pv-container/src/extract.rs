@@ -88,7 +88,8 @@ impl Extractor {
         let Some(name) = normalize_path(raw_name) else {
             return Ok(());
         };
-        if kind_from_path(&name) != EntryKind::Image {
+        // 画像と、入れ子の書庫（EPUB・CBZ など）を残す
+        if !matches!(kind_from_path(&name), EntryKind::Image | EntryKind::Archive) {
             return Ok(());
         }
         if self.found.len() >= self.limits.max_entries {

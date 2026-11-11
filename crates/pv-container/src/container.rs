@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 
-use crate::entry::{EntryId, EntryMeta};
+use crate::entry::{EntryId, EntryKind, EntryMeta};
 use crate::error::{ContainerError, Result};
 use crate::extract::ExtractGuard;
 use crate::folder::FolderContainer;
 use crate::rar::RarProvider;
 use crate::sevenz::SevenZProvider;
-use crate::source::{FileSource, Source};
+use crate::source::{FileSource, MemorySource, Source};
 use crate::text_style::TextStyle;
 use crate::zip_container::ZipProvider;
 
@@ -143,6 +143,48 @@ pub fn open_source_styled(
     guard: &ExtractGuard,
     text_style: TextStyle,
 ) -> Result<Arc<dyn Container>> {
+    open_source_depth(src, scratch, guard, text_style, 0)
+}
+
+/// 入れ子の書庫をたどる深さの上限
+const MAX_NEST: usize = 3;
+
+/// 画像が 1 枚も無く書庫（EPUB・CBZ など）だけを含む書庫は、最初の書庫を本として開く。
+fn open_source_depth(
+    src: Arc<dyn Source>,
+    scratch: &Path,
+    guard: &ExtractGuard,
+    text_style: TextStyle,
+    depth: usize,
+) -> Result<Arc<dyn Container>> {
+    let outer = open_flat(src, scratch, guard, text_style.clone())?;
+    if depth >= MAX_NEST || outer.entries().iter().any(|e| e.kind == EntryKind::Image) {
+        return Ok(outer);
+    }
+    let Some(inner) = outer
+        .entries()
+        .iter()
+        .find(|e| e.kind == EntryKind::Archive)
+    else {
+        return Ok(outer);
+    };
+    let bytes = outer.read(inner.id)?;
+    let nested = open_source_depth(
+        Arc::new(MemorySource(bytes)),
+        scratch,
+        guard,
+        text_style,
+        depth + 1,
+    )?;
+    Ok(nested)
+}
+
+fn open_flat(
+    src: Arc<dyn Source>,
+    scratch: &Path,
+    guard: &ExtractGuard,
+    text_style: TextStyle,
+) -> Result<Arc<dyn Container>> {
     let zip = ZipProvider {
         text_style,
         ..ZipProvider::default()
@@ -199,6 +241,110 @@ mod tests {
             z.write_all(data.as_bytes()).unwrap();
         }
         z.finish().unwrap();
+    }
+
+    /// 書庫（ZIP）の中に EPUB だけが入っているときは、その EPUB を本として開く
+    #[test]
+    fn epub_inside_zip_is_opened_as_book() {
+        if font_for(&Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let epub = dir.path().join("novel.epub");
+        write_novel_epub(&epub);
+        let outer = dir.path().join("books.zip");
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&outer).unwrap());
+        z.start_file("novel.epub", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        z.write_all(&std::fs::read(&epub).unwrap()).unwrap();
+        z.finish().unwrap();
+
+        let direct = open_path(&epub).unwrap().entries().len();
+        let c = open_path(&outer).unwrap();
+        assert!(c.entries().iter().any(|e| e.kind == EntryKind::Image));
+        assert_eq!(c.entries().len(), direct);
+    }
+
+    /// 外側・内側の ZIP がどの圧縮方式でも、中の EPUB を開ける
+    #[test]
+    fn epub_inside_zip_opens_for_every_compression_method() {
+        use zip::CompressionMethod as M;
+        if font_for(&Typeface::Gothic).is_none() {
+            eprintln!("skipped: no CJK font on this machine");
+            return;
+        }
+        let container =
+            r#"<container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>"#;
+        let opf = r#"<package><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="c"/></spine></package>"#;
+        let page = format!(
+            "<html><body><p>{}</p></body></html>",
+            "本文です。".repeat(800)
+        );
+        let build = |files: &[(&str, &[u8])], m: M| {
+            let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            let o = zip::write::SimpleFileOptions::default().compression_method(m);
+            for (n, d) in files {
+                z.start_file(*n, o).unwrap();
+                z.write_all(d).unwrap();
+            }
+            z.finish().unwrap().into_inner()
+        };
+        let methods = [M::Stored, M::Deflated, M::Bzip2, M::Zstd];
+        for inner_m in methods {
+            let epub = build(
+                &[
+                    ("META-INF/container.xml", container.as_bytes()),
+                    ("c.opf", opf.as_bytes()),
+                    ("c.xhtml", page.as_bytes()),
+                ],
+                inner_m,
+            );
+            for outer_m in methods {
+                let outer = build(&[("novel.epub", &epub)], outer_m);
+                let c = open_source(Arc::new(MemorySource(Bytes::from(outer))));
+                let c = c.unwrap_or_else(|e| panic!("{inner_m:?}/{outer_m:?}: {e}"));
+                assert!(
+                    c.entries().iter().any(|e| e.kind == EntryKind::Image),
+                    "{inner_m:?}/{outer_m:?}"
+                );
+            }
+        }
+    }
+
+    /// 非対応の圧縮方式の EPUB は、画像なしの本ではなく圧縮方式のエラーで知らせる
+    #[test]
+    fn epub_with_unsupported_compression_reports_unsupported_compression() {
+        let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let o = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        z.start_file("META-INF/container.xml", o).unwrap();
+        z.write_all(
+            br#"<container><rootfiles><rootfile full-path="c.opf"/></rootfiles></container>"#,
+        )
+        .unwrap();
+        z.start_file("c.opf", o).unwrap();
+        z.write_all(b"<package/>").unwrap();
+        let mut bytes = z.finish().unwrap().into_inner();
+        // 圧縮方式を 1（Shrink: 非対応）に書き換える。ローカル(+8)・セントラル(+10)の両方
+        for (sig, off) in [(&b"PK\x03\x04"[..], 8), (&b"PK\x01\x02"[..], 10)] {
+            let mut i = 0;
+            while i + 4 <= bytes.len() {
+                if &bytes[i..i + 4] == sig {
+                    bytes[i + off] = 1;
+                    bytes[i + off + 1] = 0;
+                }
+                i += 1;
+            }
+        }
+        match open_source(Arc::new(MemorySource(Bytes::from(bytes)))) {
+            Err(ContainerError::UnsupportedCompression(_)) => {}
+            other => panic!(
+                "expected unsupported-compression error, got {:?}",
+                other.map(|c| c.entries().len())
+            ),
+        }
     }
 
     /// パスから開くときも、渡した文字スタイルでページが割り付けられる
