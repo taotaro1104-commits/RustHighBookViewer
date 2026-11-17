@@ -12,7 +12,7 @@ const MAX_DEPTH: usize = 32;
 pub enum ScanKind {
     /// フォルダ直下の画像をまとめて 1 冊（サブフォルダの画像は含めない）
     Images,
-    /// 書庫ファイル（EPUB・ZIP/CBZ・7z・RAR）1 つで 1 冊
+    /// 書庫・文書ファイル（EPUB・ZIP/CBZ・7z・RAR・PDF・TXT）1 つで 1 冊
     Archive,
 }
 
@@ -127,7 +127,8 @@ mod tests {
         touch(&r.join("vol2/1.jpg"));
         touch(&r.join("vol2/inner/x.cbz"));
         touch(&r.join("vol2/inner/deeper/p.png"));
-        touch(&r.join("empty/readme.txt"));
+        touch(&r.join("empty/readme.log"));
+        touch(&r.join("doc.PDF"));
         touch(&r.join(".hidden/h.png"));
         let items = scan_books(r, 100).unwrap();
         assert_eq!(
@@ -136,6 +137,8 @@ mod tests {
                 "Images:",
                 "Archive:a.epub",
                 "Archive:b.epub",
+                "Archive:doc.PDF",
+                "Archive:memo.txt",
                 "Images:vol2",
                 "Archive:vol2/inner/x.cbz",
                 "Images:vol2/inner/deeper",

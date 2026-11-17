@@ -381,7 +381,7 @@ fn encode_png(rgb: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
 
 /// 寸法の確認（先頭だけを読む処理）に答えるための、署名 + IHDR + 空の IDAT だけの PNG の先頭部分。
 /// 本物のページを描かずに済ませるためのもの（全ページの寸法確認で全ページを描くと遅い）。
-fn png_head(w: u32, h: u32) -> Vec<u8> {
+pub(crate) fn png_head(w: u32, h: u32) -> Vec<u8> {
     fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
         out.extend_from_slice(&(data.len() as u32).to_be_bytes());
         let mut body = kind.to_vec();

@@ -8,10 +8,12 @@ use crate::entry::{EntryId, EntryKind, EntryMeta};
 use crate::error::{ContainerError, Result};
 use crate::extract::ExtractGuard;
 use crate::folder::FolderContainer;
+use crate::pdf::PdfProvider;
 use crate::rar::RarProvider;
 use crate::sevenz::SevenZProvider;
 use crate::source::{FileSource, MemorySource, Source};
 use crate::text_style::TextStyle;
+use crate::txt::TxtProvider;
 use crate::zip_container::ZipProvider;
 
 /// 目次の 1 項目
@@ -185,6 +187,9 @@ fn open_flat(
     guard: &ExtractGuard,
     text_style: TextStyle,
 ) -> Result<Arc<dyn Container>> {
+    let txt = TxtProvider {
+        text_style: text_style.clone(),
+    };
     let zip = ZipProvider {
         text_style,
         ..ZipProvider::default()
@@ -204,7 +209,8 @@ fn open_flat(
         limits,
         guard: guard.clone(),
     };
-    let providers: [&dyn ContainerProvider; 3] = [&zip, &sevenz, &rar];
+    // テキストは目印が無く何でも通りうるので、必ず最後に試す
+    let providers: [&dyn ContainerProvider; 5] = [&zip, &sevenz, &rar, &PdfProvider, &txt];
     for p in providers {
         if p.probe(src.as_ref()) == Probe::Match {
             return p.open(src);

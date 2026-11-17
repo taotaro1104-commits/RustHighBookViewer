@@ -9,28 +9,45 @@ pub trait Source: Send + Sync {
         self.len() == 0
     }
     fn read_at(&self, off: u64, buf: &mut [u8]) -> io::Result<usize>;
+    /// 元のファイル名の拡張子（小文字）。分かるときだけ。形式判定の補助に使う。
+    fn extension_hint(&self) -> Option<&str> {
+        None
+    }
 }
 
 pub struct FileSource {
     file: std::fs::File,
     len: u64,
+    ext: Option<String>,
 }
 
 impl FileSource {
     pub fn open(path: &Path) -> io::Result<Self> {
-        Self::from_file(std::fs::File::open(path)?)
+        let mut s = Self::from_file(std::fs::File::open(path)?)?;
+        s.ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase());
+        Ok(s)
     }
 
     /// 既に開いている File から作る（Android の content:// から得た fd など）。
     pub fn from_file(file: std::fs::File) -> io::Result<Self> {
         let len = file.metadata()?.len();
-        Ok(Self { file, len })
+        Ok(Self {
+            file,
+            len,
+            ext: None,
+        })
     }
 }
 
 impl Source for FileSource {
     fn len(&self) -> u64 {
         self.len
+    }
+
+    fn extension_hint(&self) -> Option<&str> {
+        self.ext.as_deref()
     }
 
     #[cfg(unix)]

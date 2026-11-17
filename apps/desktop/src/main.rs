@@ -89,7 +89,7 @@ impl eframe::App for App {
                 if let Some(p) = rfd::FileDialog::new()
                     .add_filter(
                         "コミック書庫",
-                        &["zip", "cbz", "7z", "cb7", "rar", "cbr", "epub"],
+                        &["zip", "cbz", "7z", "cb7", "rar", "cbr", "epub", "pdf", "txt"],
                     )
                     .pick_file()
                 {

@@ -260,7 +260,7 @@ mod tests {
             |ex| {
                 add(ex, "p10.png", b"ten")?;
                 add(ex, "p2.png", b"two")?;
-                add(ex, "notes.txt", b"skip")?;
+                add(ex, "notes.md", b"skip")?;
                 add(ex, "../../evil.png", b"evil")?;
                 add(ex, "", b"empty name")
             },

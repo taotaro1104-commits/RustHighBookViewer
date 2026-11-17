@@ -5,7 +5,7 @@ pub struct EntryId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
     Image,
-    /// 入れ子の書庫
+    /// 入れ子の書庫（EPUB・CBZ など）や文書（PDF・テキスト）
     Archive,
     Other,
 }
@@ -24,12 +24,14 @@ const IMAGE_EXTS: &[&str] = &[
     "jpg", "jpeg", "png", "webp", "gif", "bmp", "avif", "heic", "jxl",
 ];
 const ARCHIVE_EXTS: &[&str] = &["zip", "cbz", "7z", "cb7", "rar", "cbr", "epub"];
+/// 1 ファイルで 1 冊として開ける文書（書庫に入っていれば入れ子の本として開く）
+const DOCUMENT_EXTS: &[&str] = &["pdf", "txt"];
 
 pub fn kind_from_path(path: &str) -> EntryKind {
     let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
     match ext.as_deref() {
         Some(e) if IMAGE_EXTS.contains(&e) => EntryKind::Image,
-        Some(e) if ARCHIVE_EXTS.contains(&e) => EntryKind::Archive,
+        Some(e) if ARCHIVE_EXTS.contains(&e) || DOCUMENT_EXTS.contains(&e) => EntryKind::Archive,
         _ => EntryKind::Other,
     }
 }
@@ -47,7 +49,9 @@ mod tests {
     fn kind_detection() {
         assert_eq!(kind_from_path("a/b.JPG"), EntryKind::Image);
         assert_eq!(kind_from_path("vol.cbz"), EntryKind::Archive);
-        assert_eq!(kind_from_path("readme.txt"), EntryKind::Other);
+        assert_eq!(kind_from_path("readme.txt"), EntryKind::Archive);
+        assert_eq!(kind_from_path("a/doc.PDF"), EntryKind::Archive);
+        assert_eq!(kind_from_path("readme.md"), EntryKind::Other);
         assert_eq!(kind_from_path("noext"), EntryKind::Other);
     }
 

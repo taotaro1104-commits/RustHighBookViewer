@@ -9,6 +9,7 @@ mod folder;
 mod font;
 mod font_store;
 mod path;
+mod pdf;
 mod rar;
 mod scan;
 mod sevenz;
@@ -18,6 +19,7 @@ mod text_glyph;
 mod text_layout;
 mod text_style;
 mod text_vertical;
+mod txt;
 mod zip_container;
 
 pub use container::{
@@ -34,6 +36,7 @@ pub use font_store::{
     import_font, list_fonts, remove_font, set_font_dir, FontInfo, MAX_FONT_BYTES,
 };
 pub use path::{decode_name, normalize_path};
+pub use pdf::{PdfContainer, PdfProvider};
 pub use rar::RarProvider;
 pub use scan::{scan_books, ScanItem, ScanKind};
 pub use sevenz::SevenZProvider;
@@ -44,4 +47,5 @@ pub use text_style::{
     MAX_FONT_PX, MAX_LETTER_SPACING, MAX_LINE_SPACING, MIN_FONT_PX, MIN_LETTER_SPACING,
     MIN_LINE_SPACING,
 };
+pub use txt::TxtProvider;
 pub use zip_container::{open_nested, ZipContainer, ZipProvider};

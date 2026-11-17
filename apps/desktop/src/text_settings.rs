@@ -28,6 +28,9 @@ pub fn import_from_path(path: &Path) -> Result<FontInfo, String> {
 
 type ImportResult = Result<FontInfo, String>;
 
+const AUTHOR: &str = "Aki Sawa Developer";
+const OFFICIAL_SITE_URL: &str = "https://originapl.matchinfo-rank.com/en/";
+
 #[derive(Default)]
 pub struct TextSettingsWindow {
     pub open: bool,
@@ -160,6 +163,12 @@ impl TextSettingsWindow {
                         Err(e) => self.error = Some(e.to_string()),
                     }
                 }
+                ui.separator();
+                ui.label(format!("作者: {AUTHOR}"));
+                ui.horizontal(|ui| {
+                    ui.label("公式サイト:");
+                    ui.hyperlink(OFFICIAL_SITE_URL);
+                });
             });
         if changed {
             data.save_settings();

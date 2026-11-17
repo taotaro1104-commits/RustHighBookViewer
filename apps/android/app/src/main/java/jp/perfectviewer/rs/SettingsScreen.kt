@@ -29,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -193,6 +194,11 @@ fun SettingsScreen(state: AppState) {
 
         Section("このアプリについて") {
             Text("RustHighBookViewer ${state.versionName}", style = MaterialTheme.typography.bodyLarge)
+            Text("作者: Aki Sawa Developer", style = MaterialTheme.typography.bodyMedium)
+            val uriHandler = LocalUriHandler.current
+            TextButton(onClick = { runCatching { uriHandler.openUri(OFFICIAL_SITE_URL) } }) {
+                Text("公式サイト: $OFFICIAL_SITE_URL")
+            }
             Note("対応形式: ZIP / CBZ、7z、RAR、EPUB（画像・文章）、画像フォルダ。MIT License。RAR の展開には UnRAR を使用しています。")
         }
     }
@@ -226,6 +232,8 @@ private fun Section(title: String, content: @Composable () -> Unit) {
         content()
     }
 }
+
+private const val OFFICIAL_SITE_URL = "https://originapl.matchinfo-rank.com/en/"
 
 @Composable
 private fun Note(text: String) {

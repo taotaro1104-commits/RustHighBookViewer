@@ -4,13 +4,13 @@
 
 **English** | [日本語](README.ja.md)
 
-A comic, image and novel viewer written in Rust. It reads ZIP/CBZ, 7z, RAR, EPUB and folders of images, with right-to-left two-page spreads and vertical or horizontal text. It runs on Android and Windows.
+A comic, image and novel viewer written in Rust. It reads ZIP/CBZ, 7z, RAR, EPUB, PDF, TXT and folders of images, with right-to-left two-page spreads and vertical or horizontal text. It runs on Android and Windows.
 
 > **Status: under development (latest v0.1.11, pre-release).** On Android it has only been checked in an Android 15 emulator; it has not been tested on a real device yet.
 
 ## Features
 
-- **Many formats**: ZIP / CBZ, 7z, RAR (4.x / 5.x, not encrypted), EPUB, and folders of images.
+- **Many formats**: ZIP / CBZ, 7z, RAR (4.x / 5.x, not encrypted), EPUB, PDF (each page is drawn as an image; not encrypted), TXT (UTF-8 / UTF-16 / Shift_JIS detected automatically, shown like a text EPUB), and folders of images. PDF and TXT files inside an archive are opened too.
 - **Comfortable reading**: single page, two pages, automatic spread, and vertical scrolling. Right or left binding, a cover shown on its own, wide pages shown alone, and fit to width / height / whole page / fullscreen.
 - **Zoom and magnifier**: pinch or double-tap to zoom and pan; a 2x magnifier that follows your finger (Android).
 - **EPUB, comics and novels**: image-based EPUBs (comics, photo books) open in reading order. Text-only EPUBs such as web novels, and EPUBs that mix text and illustrations, are drawn page by page with a Japanese font from the device, in **vertical writing (switchable to horizontal)**. You can change the text size (28–160), the line spacing (100–240%), the letter spacing (-10 to +60%), bold and italic, the typeface (Gothic or Mincho/serif) and the text and background colors (backgrounds: white, ivory, sepia, light green, dark gray, black; text: black, brown, navy, green, light gray, white) from the reader menu and the settings screen. A live preview shows the chosen colors, and you get a warning when the text and background are too close to read.
@@ -39,7 +39,7 @@ The sample images are artwork made for this repository and the opening of *I Am 
 | Platform | Notes |
 |---|---|
 | Android | Android 8.0 (API 26) or later. A Kotlin / Jetpack Compose UI on top of the Rust core through UniFFI. |
-| Windows | Desktop version (egui). Opens ZIP/CBZ, 7z, RAR, EPUB and folders; drag and drop a file or folder onto the exe. |
+| Windows | Desktop version (egui). Opens ZIP/CBZ, 7z, RAR, EPUB, PDF, TXT and folders; drag and drop a file or folder onto the exe. |
 | Command line | `pv-cli`: writes the images of a folder or archive out as PNG files. |
 
 ## Download

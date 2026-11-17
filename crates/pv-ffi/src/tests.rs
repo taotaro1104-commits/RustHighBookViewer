@@ -479,6 +479,7 @@ fn scan_and_register_split_a_tree_into_books() {
         got,
         vec![
             ("lib", true),
+            ("note", false),
             ("第1巻", true),
             ("第2巻", true),
             ("vol", false)
@@ -490,7 +491,7 @@ fn scan_and_register_split_a_tree_into_books() {
         core.register_local(i.path.clone()).unwrap();
     }
     let books = core.list_books(String::new(), false, PvSort::Name).unwrap();
-    assert_eq!(books.len(), 4);
+    assert_eq!(books.len(), 5);
     let pages = |t: &str| books.iter().find(|b| b.title == t).unwrap().page_count;
     assert_eq!(
         (pages("lib"), pages("第1巻"), pages("第2巻"), pages("vol")),
@@ -503,7 +504,7 @@ fn scan_and_register_split_a_tree_into_books() {
         core.list_books(String::new(), false, PvSort::Name)
             .unwrap()
             .len(),
-        4
+        5
     );
 }
 

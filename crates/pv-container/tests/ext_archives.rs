@@ -26,9 +26,10 @@ fn sevenz_lists_images_in_natural_order_and_reads_them() {
     let archive = make_7z(dir.path());
     let scratch = dir.path().join("scratch");
     let c = open_source_in(Arc::new(FileSource::open(&archive).unwrap()), &scratch).unwrap();
-    // 画像だけが、自然順（p10 より sub/p2 が後ろ: パス全体の比較）で並ぶ
+    // 画像と文書（txt）が残る。画像は自然順（p10 より sub/p2 が後ろ: パス全体の比較）
     let n = names(c.as_ref());
-    assert_eq!(n.len(), 2, "{n:?}");
+    assert_eq!(n.len(), 3, "{n:?}");
+    assert!(n.contains(&"notes.txt".to_string()));
     assert!(n.contains(&"p10.png".to_string()) && n.contains(&"sub/p2.png".to_string()));
     let ten = c.entries().iter().find(|e| e.path == "p10.png").unwrap().id;
     assert_eq!(&c.read(ten).unwrap()[..], b"ten");
@@ -46,15 +47,15 @@ fn sevenz_scratch_is_cleaned_when_container_is_dropped() {
 }
 
 #[test]
-fn rar_extracts_stored_images_and_skips_other_files() {
+fn rar_extracts_stored_images_and_documents() {
     let bytes =
         std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/stored.rar"))
             .unwrap();
     let dir = tempfile::tempdir().unwrap();
     let scratch = dir.path().join("scratch");
     let c = open_source_in(Arc::new(MemorySource(bytes.into())), &scratch).unwrap();
-    assert_eq!(names(c.as_ref()), ["p10.png", "sub/p2.png"]);
-    assert_eq!(&c.read(EntryId(1)).unwrap()[..], b"two");
+    assert_eq!(names(c.as_ref()), ["notes.txt", "p10.png", "sub/p2.png"]);
+    assert_eq!(&c.read(EntryId(2)).unwrap()[..], b"two");
     drop(c);
     // 書き出した RAR 本体の一時ファイルも残らない
     assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
